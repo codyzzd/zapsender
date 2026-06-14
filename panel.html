@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zapsender</title>
+    <link rel="stylesheet" href="panel.css">
+  </head>
+  <body>
+    <aside class="campaign-sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-mark">Z</span>
+          <div>
+            <strong>Zapsender</strong>
+            <small>Extensao Chrome</small>
+          </div>
+        </div>
+        <button id="new-campaign-btn" type="button" class="primary sidebar-primary">Nova campanha</button>
+      </div>
+
+      <div class="sidebar-section-heading">
+        <span>Disparos</span>
+        <strong id="campaign-count">0</strong>
+      </div>
+      <div id="campaign-list" class="campaign-list"></div>
+
+      <div class="sidebar-footer">
+        <div class="whatsapp-note">
+          <strong>WhatsApp Web</strong>
+          <span>A extensao localiza, ativa e controla uma aba aberta e logada durante o envio.</span>
+        </div>
+        <div class="backup-actions">
+          <button id="export-backup-btn" type="button">Exportar backup</button>
+          <label class="button-file">
+            Importar backup
+            <input id="import-backup-file" type="file" accept=".json,application/json">
+          </label>
+        </div>
+      </div>
+    </aside>
+
+    <main class="campaign-workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">Campanha ativa</span>
+          <h1 id="active-campaign-title">Disparo</h1>
+          <p>Configure a lista, as mensagens e a execucao deste disparo.</p>
+        </div>
+        <div class="mode-control">
+          <label for="mode">Modo</label>
+          <select id="mode">
+            <option value="manual">Manual</option>
+            <option value="assistido">Assistido</option>
+            <option value="auto">Auto</option>
+          </select>
+        </div>
+      </header>
+
+      <section class="campaign-header panel">
+        <div class="campaign-title-row">
+          <label>
+            Nome da campanha
+            <input id="campaign-name" type="text" placeholder="Ex: Retentativa domingo">
+          </label>
+          <button id="save-campaign-name-btn" type="button">Renomear</button>
+        </div>
+      </section>
+
+      <section class="stats-grid" aria-label="Progresso">
+        <article><span>Total</span><strong id="stat-total">0</strong></article>
+        <article><span>Pendentes</span><strong id="stat-pending">0</strong></article>
+        <article><span>Abertos</span><strong id="stat-open">0</strong></article>
+        <article><span>Enviados</span><strong id="stat-sent">0</strong></article>
+        <article><span>Pulados</span><strong id="stat-skipped">0</strong></article>
+        <article><span>Erros</span><strong id="stat-errors">0</strong></article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Contatos</h2>
+            <p>Use uma coluna <code>telefone</code>; <code>nome</code> e opcional. Sem cabecalho, a primeira coluna vira telefone.</p>
+          </div>
+          <div class="heading-actions">
+            <button id="preview-import-btn" type="button">Normalizar CSV</button>
+            <button id="import-btn" type="button" class="primary" disabled>Usar contatos normalizados</button>
+          </div>
+        </div>
+
+        <div class="import-grid">
+          <label class="file-drop">
+            <input id="csv-file" type="file" accept=".csv,text/csv">
+            <span>Selecionar arquivo CSV</span>
+          </label>
+          <label class="textarea-label">
+            <span>Ou cole o CSV</span>
+            <textarea id="csv-text" placeholder="telefone,nome&#10;(85) 99999-9999,Ana&#10;85988887777"></textarea>
+          </label>
+        </div>
+        <div id="import-errors" class="error-list" hidden></div>
+        <div id="normalization-panel" class="normalization-panel" hidden>
+          <div class="panel-heading compact">
+            <div>
+              <h3>Normalizacao</h3>
+              <p>Confira como cada numero sera salvo antes de entrar na fila.</p>
+            </div>
+            <span id="normalization-summary" class="counter"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Original</th>
+                  <th>Normalizado</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="normalization-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Mensagem</h2>
+            <p>Cadastre versoes da mensagem. No Auto, uma versao e sorteada por contato.</p>
+          </div>
+          <div class="heading-actions">
+            <span class="counter"><strong id="char-count">0</strong> caracteres</span>
+            <button id="add-message-btn" type="button">Adicionar versao</button>
+          </div>
+        </div>
+        <div class="message-reference">
+          <p>Variaveis disponiveis: <code>{nome}</code> e <code>{telefone}</code>.</p>
+          <details>
+            <summary>Formatacao do WhatsApp</summary>
+            <div class="formatting-grid">
+              <div><span>Negrito</span><code>*texto*</code><strong>texto</strong></div>
+              <div><span>Italico</span><code>_texto_</code><em>texto</em></div>
+              <div><span>Riscado</span><code>~texto~</code><s>texto</s></div>
+              <div><span>Monoespacado</span><code>```texto```</code><kbd>texto</kbd></div>
+              <div><span>Codigo curto</span><code>`texto`</code><kbd>texto</kbd></div>
+              <div><span>Citacao</span><code>&gt; texto</code><span>&gt; texto</span></div>
+              <div><span>Lista</span><code>- texto</code><span>- texto</span></div>
+              <div><span>Lista numerada</span><code>1. texto</code><span>1. texto</span></div>
+            </div>
+            <small>A formatacao aparece no WhatsApp depois que a mensagem e preparada ou enviada.</small>
+          </details>
+        </div>
+        <div class="attachment-settings">
+          <div class="attachment-settings-heading">
+            <div>
+              <strong>Anexo</strong>
+              <small>Imagem, video, documento ou audio de ate 50 MB. No Auto, o arquivo sai antes do texto.</small>
+            </div>
+            <label>
+              Uso do anexo
+              <select id="attachment-mode">
+                <option value="none">Sem anexo</option>
+                <option value="campaign">Um anexo para a campanha</option>
+                <option value="perVersion">Um anexo por versao</option>
+              </select>
+            </label>
+          </div>
+          <div id="campaign-attachment-editor"></div>
+        </div>
+        <div id="message-versions" class="message-versions"></div>
+        <div class="preview-box">
+          <span>Preview do contato atual</span>
+          <p id="message-preview"></p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Execucao</h2>
+            <p id="current-contact-label">Nenhum contato selecionado.</p>
+          </div>
+          <div id="countdown" class="countdown" hidden></div>
+        </div>
+
+        <div class="current-grid">
+          <div>
+            <label>Telefone normalizado</label>
+            <div class="copy-row">
+              <code id="current-phone">-</code>
+              <button id="copy-phone" type="button">Copiar</button>
+            </div>
+          </div>
+          <div>
+            <label>Mensagem pronta</label>
+            <div class="copy-row message-copy">
+              <span id="current-message">-</span>
+              <button id="copy-message" type="button">Copiar</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="interval-grid">
+          <label>
+            Intervalo minimo (s)
+            <input id="min-interval" type="number" min="3" step="1">
+          </label>
+          <label>
+            Intervalo maximo (s)
+            <input id="max-interval" type="number" min="3" step="1">
+          </label>
+        </div>
+
+        <div class="auto-setup">
+          <div>
+            <label>Aba do WhatsApp</label>
+            <strong id="auto-status">Nao verificada</strong>
+            <small>Em segundo plano, o Chrome pode acrescentar alguns segundos ao processamento.</small>
+          </div>
+          <button id="check-whatsapp-btn" type="button">Verificar aba</button>
+        </div>
+
+        <label class="focus-setting">
+          <input id="focus-whatsapp-tab" type="checkbox">
+          <span>
+            <strong>Trazer WhatsApp para frente durante o envio</strong>
+            <small>Quando desligado, a extensao controla a aba sem interromper seu trabalho.</small>
+          </span>
+        </label>
+
+        <div id="send-progress" class="send-progress" aria-live="polite">
+          <div class="send-progress-heading">
+            <div>
+              <span id="send-progress-status">Estimativa antes do envio</span>
+              <strong id="send-progress-percent">0%</strong>
+            </div>
+            <span id="send-progress-count">0 de 0 concluidos</span>
+          </div>
+          <div
+            id="send-progress-track"
+            class="send-progress-track"
+            role="progressbar"
+            aria-label="Progresso do envio"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <span id="send-progress-bar"></span>
+          </div>
+          <div class="send-progress-details">
+            <span id="send-progress-estimate">Adicione contatos para calcular o tempo.</span>
+            <span id="send-progress-finish"></span>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button id="play-btn" type="button" class="primary">Iniciar envio automatico</button>
+          <button id="pause-btn" type="button">Pausar</button>
+          <button id="open-next-btn" type="button">Abrir proximo</button>
+          <button id="skip-btn" type="button">Pular</button>
+          <button id="sent-btn" type="button" class="success">Marcar como enviado</button>
+          <button id="reset-btn" type="button" class="danger">Resetar progresso</button>
+        </div>
+
+        <div id="ready-alert" class="ready-alert" hidden></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Relatorio</h2>
+            <p>Baixe o CSV com status e data da ultima acao.</p>
+          </div>
+          <div class="heading-actions">
+            <button id="export-report-btn" type="button">Exportar relatorio CSV</button>
+            <button id="export-success-btn" type="button">Exportar sucessos CSV</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Previa e fila</h2>
+            <p>Filtre por status, selecione uma linha ou remova contatos antes de dar Play.</p>
+          </div>
+          <div class="heading-actions">
+            <label class="compact-label">
+              Status
+              <select id="contact-status-filter">
+                <option value="all">Todos</option>
+                <option value="pendente">Pendentes</option>
+                <option value="aberto">Abertos</option>
+                <option value="enviado">Enviados</option>
+                <option value="erro">Erros</option>
+                <option value="pulado">Pulados</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Telefone original</th>
+                <th>Telefone normalizado</th>
+                <th>Status</th>
+                <th>Ultima acao</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody id="contacts-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="reset-modal">
+      <form method="dialog">
+        <h2>Resetar progresso?</h2>
+        <p>Todos os contatos validos voltarao para pendente. Contatos invalidos continuarao marcados como erro.</p>
+        <div class="modal-actions">
+          <button value="cancel" type="submit">Cancelar</button>
+          <button id="confirm-reset" value="confirm" type="submit" class="danger">Resetar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="campaign-modal">
+      <form method="dialog">
+        <h2>Nova campanha</h2>
+        <label>
+          Nome
+          <input id="new-campaign-name" type="text" placeholder="Ex: Clientes de junho">
+        </label>
+        <fieldset class="creation-options">
+          <legend>Como deseja comecar?</legend>
+          <label>
+            <input type="radio" name="campaign-source-mode" value="blank" checked>
+            <span><strong>Em branco</strong><small>Comece sem contatos e importe um CSV depois.</small></span>
+          </label>
+          <label>
+            <input type="radio" name="campaign-source-mode" value="copy">
+            <span><strong>Copiar campanha existente</strong><small>Escolha a origem e os status que entrarao no novo disparo.</small></span>
+          </label>
+        </fieldset>
+        <div id="copy-campaign-options" class="copy-campaign-options" hidden>
+          <label>
+            Campanha de origem
+            <select id="source-campaign-select"></select>
+          </label>
+          <fieldset class="status-checks">
+            <legend>Status para copiar</legend>
+            <label><input type="checkbox" name="copy-status" value="pendente"> Pendentes</label>
+            <label><input type="checkbox" name="copy-status" value="aberto"> Abertos</label>
+            <label><input type="checkbox" name="copy-status" value="enviado automaticamente"> Sucesso auto</label>
+            <label><input type="checkbox" name="copy-status" value="enviado manualmente"> Sucesso manual</label>
+            <label><input type="checkbox" name="copy-status" value="erro"> Erros</label>
+            <label><input type="checkbox" name="copy-status" value="pulado"> Pulados</label>
+          </fieldset>
+        </div>
+        <div class="modal-actions">
+          <button value="cancel" type="submit">Cancelar</button>
+          <button id="confirm-create-campaign" value="confirm" type="submit" class="primary">Criar campanha</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

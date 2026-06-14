@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Zapsender",
+  "version": "1.1.6",
+  "description": "Fila de mensagens para WhatsApp Web sem Playwright.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "unlimitedStorage", "windows"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "action": {
+    "default_title": "Abrir Zapsender"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content/whatsapp-content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
