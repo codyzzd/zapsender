@@ -1,0 +1,10 @@
+{
+  "name": "zapsender-chrome-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-extension.js",
+    "test": "node --test",
+    "sync:wwebjs": "node scripts/sync-wwebjs.js"
+  }
+}

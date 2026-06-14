@@ -699,8 +699,21 @@ async function openNext() {
 
     const focusTab = campaign.settings.focusWhatsAppTab;
     const openResult = autoMode
-      ? await sendWhatsAppMessage(waLink, focusTab, renderedText, attachment)
+      ? await sendWhatsAppMessage(contact.phoneNormalized, focusTab, renderedText, attachment)
       : await openWhatsAppUrl(waLink, focusTab);
+    if (autoMode && openResult.fatal) {
+      playing = false;
+      pauseSendSession();
+      clearCountdown();
+      setActiveCampaign(campaign);
+      await persist(state);
+      setReadyAlert(
+        true,
+        `${openResult.message || "Motor interno do WhatsApp indisponivel."} O disparo foi pausado sem alterar este contato.`,
+        "error"
+      );
+      return;
+    }
     if (autoMode && openResult.status === "sent") {
       updateContactStatus(campaign, contact.id, "enviado automaticamente");
     } else if (autoMode) {
@@ -752,8 +765,8 @@ async function openNext() {
   }
 }
 
-function sendWhatsAppMessage(url, focusTab, text = "", attachment = null) {
-  return sendWorkerRequest({ type: "SEND_WHATSAPP_MESSAGE", url, focusTab, text, attachment }, 120000);
+function sendWhatsAppMessage(phone, focusTab, text = "", attachment = null) {
+  return sendWorkerRequest({ type: "SEND_WHATSAPP_MESSAGE", phone, focusTab, text, attachment }, 360000);
 }
 
 function resolveAttachmentForSelection(campaign, messageIndex) {
@@ -767,7 +780,7 @@ function openWhatsAppUrl(url, focusTab) {
 }
 
 function checkWhatsAppTab() {
-  return sendWorkerRequest({ type: "CHECK_WHATSAPP_TAB" }, 10000);
+  return sendWorkerRequest({ type: "CHECK_WHATSAPP_TAB" }, 65000);
 }
 
 function sendWorkerRequest(payload, timeoutMs) {
@@ -1071,11 +1084,11 @@ els.contactStatusFilter.addEventListener("change", updateTable);
 els.checkWhatsappBtn.addEventListener("click", async () => {
   const result = await checkWhatsAppTab();
   if (result.ready) {
-    els.autoStatus.textContent = "Aba encontrada";
-    setReadyAlert(true, "Aba do WhatsApp Web encontrada.");
+    els.autoStatus.textContent = "Motor pronto";
+    setReadyAlert(true, "WhatsApp Web encontrado e motor de envio pronto.");
   } else {
-    els.autoStatus.textContent = "Aba nao encontrada";
-    setReadyAlert(true, result.error || "Abra web.whatsapp.com em uma aba antes de iniciar.", "error");
+    els.autoStatus.textContent = "Motor indisponivel";
+    setReadyAlert(true, result.message || result.error || "Abra e conecte o WhatsApp Web antes de iniciar.", "error");
   }
 });
 
@@ -1103,10 +1116,10 @@ els.playBtn.addEventListener("click", async () => {
     pauseSendSession();
     updateBusyState();
     updateSendProgress();
-    setReadyAlert(true, tabStatus.error || "Abra web.whatsapp.com em uma aba antes de iniciar.", "error");
+    setReadyAlert(true, tabStatus.message || tabStatus.error || "Abra e conecte o WhatsApp Web antes de iniciar.", "error");
     return;
   }
-  els.autoStatus.textContent = "Aba encontrada";
+  els.autoStatus.textContent = "Motor pronto";
   await openNext();
 });
 

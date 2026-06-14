@@ -23,7 +23,9 @@ chrome.runtime.onConnect.addListener((port) => {
       .then((result) => postPortResponse(port, message.requestId, result))
       .catch((error) => postPortResponse(port, message.requestId, {
         status: "error",
-        message: error.message
+        message: error.message,
+        code: error.code || "worker_error",
+        fatal: error.fatal === true
       }));
   });
 });
@@ -37,11 +39,18 @@ async function handleWorkerRequest(message) {
   }
   if (message?.type === "CHECK_WHATSAPP_TAB") {
     const tab = await findWhatsAppTab();
+    if (!tab?.id) {
+      return { ready: false, engineReady: false, tabId: null, title: "", url: "" };
+    }
+    await ensureWhatsAppRuntime(tab.id);
+    const engine = await getEngineStatus(tab.id);
     return {
-      ready: Boolean(tab?.id),
-      tabId: tab?.id || null,
-      title: tab?.title || "",
-      url: tab?.url || ""
+      ready: engine.status === "ready",
+      engineReady: engine.status === "ready",
+      message: engine.message || "",
+      tabId: tab.id,
+      title: tab.title || "",
+      url: tab.url || ""
     };
   }
   throw new Error("Comando desconhecido do Zapsender.");
@@ -68,17 +77,25 @@ async function sendToWhatsApp(message, focusTab = false) {
     }
   }
 
-  const tab = await openWhatsAppUrl(message.url, focusTab);
-  await ensureContentScript(tab.tabId);
+  const tab = await prepareWhatsAppTab(focusTab);
+  if (tab.status === "error") return tab;
 
   if (message.attachment?.id) {
-    return sendAttachmentAndText(tab.tabId, message.attachment, message.text || "", attachmentRecord);
+    return sendAttachmentAndText(
+      tab.tabId,
+      message.phone,
+      message.attachment,
+      message.text || "",
+      attachmentRecord
+    );
   }
 
   const response = await sendContentRequest(tab.tabId, {
-    type: "ZAPSENDER_SEND_CURRENT",
-    timeoutMs: 30000
-  }, 45000);
+    type: "ZAPSENDER_SEND_DIRECT",
+    phone: message.phone,
+    text: message.text || "",
+    bridgeTimeoutMs: 90000
+  }, 100000);
 
   return {
     ...response,
@@ -86,7 +103,7 @@ async function sendToWhatsApp(message, focusTab = false) {
   };
 }
 
-async function sendAttachmentAndText(tabId, reference, text, record) {
+async function sendAttachmentAndText(tabId, phone, reference, text, record) {
   const transferId = `transfer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const buffer = await record.blob.arrayBuffer();
   const response = await withContentPort(tabId, async (request) => {
@@ -108,20 +125,48 @@ async function sendAttachmentAndText(tabId, reference, text, record) {
         transferId,
         index,
         data: arrayBufferToBase64(chunk)
-      }, 10000);
+      }, 15000);
     }
 
     return request({
       type: "ZAPSENDER_MEDIA_COMMIT",
       transferId,
+      phone,
       text,
-      timeoutMs: 45000
-    }, 60000);
+      bridgeTimeoutMs: 240000
+    }, 250000);
   });
   return {
     ...response,
     tabId
   };
+}
+
+async function prepareWhatsAppTab(focusTab = false) {
+  const tab = await findWhatsAppTab();
+  if (!tab?.id) {
+    throw new Error("Abra o WhatsApp Web em uma aba antes de iniciar.");
+  }
+
+  if (tab.status !== "complete") await waitForTabLoaded(tab.id);
+  if (focusTab) {
+    await chrome.tabs.update(tab.id, { active: true });
+    if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
+  }
+
+  await ensureWhatsAppRuntime(tab.id);
+  const engine = await getEngineStatus(tab.id);
+  if (engine.status !== "ready") {
+    return {
+      status: "error",
+      message: engine.message || "Motor interno do WhatsApp indisponivel.",
+      fatal: true,
+      code: engine.code || "engine_unavailable",
+      tabId: tab.id
+    };
+  }
+
+  return { status: "ready", tabId: tab.id };
 }
 
 async function openWhatsAppUrl(url, focusTab = false) {
@@ -188,18 +233,50 @@ function waitForTabLoaded(tabId) {
   });
 }
 
-async function ensureContentScript(tabId) {
+async function ensureWhatsAppRuntime(tabId) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: "ZAPSENDER_PING" });
-    if (response?.status !== "ready" || response.version !== "1.1.6") {
+    if (response?.status !== "ready" || response.version !== "1.2.0") {
       throw new Error("Content script desatualizado.");
     }
   } catch (_error) {
     await chrome.scripting.executeScript({
       target: { tabId },
+      files: [
+        "content/injected/wwebjs-utils.js",
+        "content/injected/whatsapp-main.js"
+      ],
+      world: "MAIN"
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId },
       files: ["content/whatsapp-content.js"]
     });
   }
+}
+
+async function getEngineStatus(tabId) {
+  const ping = () => sendContentRequest(tabId, {
+    type: "ZAPSENDER_ENGINE_PING",
+    bridgeTimeoutMs: 20000
+  }, 25000);
+
+  try {
+    const result = await ping();
+    if (result.status === "ready") return result;
+  } catch (_error) {
+    // Tenta reinjetar o motor abaixo.
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [
+      "content/injected/wwebjs-utils.js",
+      "content/injected/whatsapp-main.js"
+    ],
+    world: "MAIN"
+  });
+  return ping();
 }
 
 function sendContentRequest(tabId, payload, timeoutMs) {
