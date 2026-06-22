@@ -24,6 +24,7 @@ const els = {
   normalizationSummary: document.querySelector("#normalization-summary"),
   normalizationTable: document.querySelector("#normalization-table"),
   messageVersions: document.querySelector("#message-versions"),
+  nameFormat: document.querySelector("#name-format"),
   attachmentMode: document.querySelector("#attachment-mode"),
   campaignAttachmentEditor: document.querySelector("#campaign-attachment-editor"),
   addMessageBtn: document.querySelector("#add-message-btn"),
@@ -165,6 +166,7 @@ function render() {
   els.minInterval.value = campaign.settings.minInterval;
   els.maxInterval.value = campaign.settings.maxInterval;
   els.focusWhatsappTab.checked = campaign.settings.focusWhatsAppTab;
+  els.nameFormat.value = campaign.nameFormat || "original";
   els.attachmentMode.value = campaign.attachmentMode || "none";
   els.playBtn.textContent = campaign.settings.mode === "auto" ? "Iniciar envio automatico" : "Play";
   renderCampaignList();
@@ -375,7 +377,7 @@ function formatFinishRange(minSeconds, maxSeconds) {
 function updateCurrentPanel() {
   const contact = currentContact();
   const messageTemplate = selectedMessageTemplate();
-  const message = renderMessage(messageTemplate, contact);
+  const message = renderMessage(messageTemplate, contact, { nameFormat: activeCampaign()?.nameFormat });
   els.charCount.textContent = String(messageTemplate || "").length;
   els.messagePreview.textContent = message || "-";
   els.currentMessage.textContent = message || "-";
@@ -687,9 +689,12 @@ async function openNext() {
     const selection = autoMode
       ? getRandomMessageSelection(campaign)
       : { index: selectedMessageIndex(), template: getSelectedMessageTemplate(campaign) };
-    const renderedText = renderMessage(selection.template, contact);
+    const renderedText = renderMessage(selection.template, contact, { nameFormat: campaign.nameFormat });
     const attachment = resolveAttachmentForSelection(campaign, selection.index);
-    const waLink = buildWaLink(contact, selection.template, { includeText: !autoMode || !attachment });
+    const waLink = buildWaLink(contact, selection.template, {
+      includeText: !autoMode || !attachment,
+      nameFormat: campaign.nameFormat
+    });
 
     if (campaign.settings.mode === "manual") {
       setActiveCampaign(campaign);
@@ -1065,6 +1070,15 @@ els.addMessageBtn.addEventListener("click", async () => {
   await persist(state);
 });
 
+els.nameFormat.addEventListener("change", async () => {
+  setActiveCampaign({
+    ...activeCampaign(),
+    nameFormat: els.nameFormat.value
+  });
+  updateCurrentPanel();
+  await persist(state);
+});
+
 els.attachmentMode.addEventListener("change", async () => {
   setActiveCampaign({
     ...activeCampaign(),
@@ -1098,7 +1112,9 @@ els.copyPhone.addEventListener("click", async () => {
 });
 
 els.copyMessage.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(renderMessage(selectedMessageTemplate(), currentContact()));
+  await navigator.clipboard.writeText(renderMessage(selectedMessageTemplate(), currentContact(), {
+    nameFormat: activeCampaign()?.nameFormat
+  }));
 });
 
 els.playBtn.addEventListener("click", async () => {

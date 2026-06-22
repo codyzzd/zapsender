@@ -135,7 +135,18 @@
           </div>
         </div>
         <div class="message-reference">
-          <p>Variaveis disponiveis: <code>{nome}</code> e <code>{telefone}</code>.</p>
+          <div class="variable-options">
+            <p>Variaveis disponiveis: <code>{nome}</code> e <code>{telefone}</code>.</p>
+            <label>
+              Formato de {nome}
+              <select id="name-format">
+                <option value="original">Como veio no CSV</option>
+                <option value="reorderComma">Sobrenome depois do nome</option>
+                <option value="firstAndLast">Primeiro nome + ultimo sobrenome</option>
+                <option value="firstOnly">Primeiro nome</option>
+              </select>
+            </label>
+          </div>
           <details>
             <summary>Formatacao do WhatsApp</summary>
             <div class="formatting-grid">

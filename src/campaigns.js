@@ -1,5 +1,5 @@
 import { getStats, sanitizeSettings } from "./queue.js";
-import { normalizeMessageTemplates } from "./message.js";
+import { DEFAULT_NAME_FORMAT, normalizeMessageTemplates, normalizeNameFormat } from "./message.js";
 
 export const STATUS_FILTERS = [
   { value: "all", label: "Todos" },
@@ -55,6 +55,7 @@ export function createCampaign(options = {}, contacts = []) {
     messageTemplate: templates[selectedMessageIndex] || templates[0] || "",
     messageTemplates: templates,
     selectedMessageIndex,
+    nameFormat: normalizeNameFormat(options.nameFormat || DEFAULT_NAME_FORMAT),
     attachmentMode: normalizeAttachmentMode(options.attachmentMode),
     attachment: normalizeAttachmentReference(options.attachment),
     versionAttachments: normalizeVersionAttachments(options.versionAttachments, templates.length),
@@ -196,6 +197,7 @@ export function duplicateCampaignByStatuses(appState, sourceCampaign, statuses, 
     source: `derived:${sourceCampaign.id}`,
     messageTemplates: sourceCampaign.messageTemplates,
     selectedMessageIndex: sourceCampaign.selectedMessageIndex,
+    nameFormat: sourceCampaign.nameFormat,
     attachmentMode: sourceCampaign.attachmentMode,
     attachment: sourceCampaign.attachment,
     versionAttachments: sourceCampaign.versionAttachments,
@@ -230,6 +232,7 @@ export function touchCampaign(campaign) {
     messageTemplates: templates,
     selectedMessageIndex,
     messageTemplate: templates[selectedMessageIndex] || templates[0] || "",
+    nameFormat: normalizeNameFormat(campaign.nameFormat),
     attachmentMode: normalizeAttachmentMode(campaign.attachmentMode),
     attachment: normalizeAttachmentReference(campaign.attachment),
     versionAttachments: normalizeVersionAttachments(campaign.versionAttachments, templates.length),
@@ -270,6 +273,7 @@ function migrateLegacyState(raw) {
     messageTemplate: raw.messageTemplate,
     messageTemplates: raw.messageTemplates,
     selectedMessageIndex: raw.selectedMessageIndex,
+    nameFormat: raw.nameFormat,
     settings: raw.settings,
     currentIndex: raw.currentIndex
   }, raw.contacts || []);
@@ -299,6 +303,7 @@ function normalizeCampaign(campaign, fallbackName) {
     messageTemplate: templates[selectedMessageIndex] || templates[0] || "",
     messageTemplates: templates,
     selectedMessageIndex,
+    nameFormat: normalizeNameFormat(campaign.nameFormat),
     attachmentMode: normalizeAttachmentMode(campaign.attachmentMode),
     attachment: normalizeAttachmentReference(campaign.attachment),
     versionAttachments: normalizeVersionAttachments(campaign.versionAttachments, templates.length),

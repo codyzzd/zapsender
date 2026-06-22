@@ -1,6 +1,43 @@
-export function renderMessage(template, contact) {
+export const NAME_FORMATS = {
+  ORIGINAL: "original",
+  REORDER_COMMA: "reorderComma",
+  FIRST_AND_LAST: "firstAndLast",
+  FIRST_ONLY: "firstOnly"
+};
+
+export const DEFAULT_NAME_FORMAT = NAME_FORMATS.ORIGINAL;
+
+export function normalizeNameFormat(format) {
+  return Object.values(NAME_FORMATS).includes(format) ? format : DEFAULT_NAME_FORMAT;
+}
+
+export function formatNameVariable(name, format = DEFAULT_NAME_FORMAT) {
+  const normalizedName = String(name || "").replace(/\s+/g, " ").trim();
+  const normalizedFormat = normalizeNameFormat(format);
+  if (!normalizedName || normalizedFormat === NAME_FORMATS.ORIGINAL) return normalizedName;
+
+  const reorderedName = reorderCommaName(normalizedName);
+  if (normalizedFormat === NAME_FORMATS.REORDER_COMMA) return reorderedName;
+
+  const parts = reorderedName.split(" ").filter(Boolean);
+  if (!parts.length) return "";
+  if (normalizedFormat === NAME_FORMATS.FIRST_ONLY) return parts[0];
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1]}`;
+}
+
+function reorderCommaName(name) {
+  const commaIndex = name.indexOf(",");
+  if (commaIndex === -1) return name;
+
+  const beforeComma = name.slice(0, commaIndex).trim();
+  const afterComma = name.slice(commaIndex + 1).trim();
+  return [afterComma, beforeComma].filter(Boolean).join(" ");
+}
+
+export function renderMessage(template, contact, options = {}) {
   const values = {
-    nome: contact?.name || "",
+    nome: formatNameVariable(contact?.name, options.nameFormat),
     telefone: contact?.phoneDisplay || contact?.phoneNormalized || ""
   };
 
@@ -40,7 +77,7 @@ export function getRandomMessageSelection(state) {
 }
 
 export function buildWaLink(contact, template, options = {}) {
-  const message = renderMessage(template, contact);
+  const message = renderMessage(template, contact, options);
   const params = new URLSearchParams({
     phone: contact.phoneNormalized,
     type: "phone_number",
