@@ -452,6 +452,53 @@ dialog label,
   gap: 14px;
 }
 
+.group-import {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8faf8;
+}
+
+.group-import-controls,
+.group-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.group-import-controls > label {
+  min-width: min(360px, 100%);
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.group-import-controls .checkbox-row {
+  min-width: 140px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.group-import-controls .checkbox-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.inline-status {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .file-drop {
   min-height: 150px;
   display: grid;
@@ -473,6 +520,28 @@ dialog label,
   gap: 6px;
   color: var(--muted);
   font-weight: 650;
+}
+
+.manual-contact-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) auto minmax(160px, 0.8fr);
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.manual-contact-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.inline-error {
+  align-self: center;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .error-list {
@@ -1068,6 +1137,7 @@ dialog select {
 @media (max-width: 640px) {
   .campaign-title-row,
   .import-grid,
+  .manual-contact-form,
   .current-grid,
   .interval-grid,
   .stats-grid,

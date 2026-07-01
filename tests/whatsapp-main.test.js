@@ -11,6 +11,8 @@ function createHarness(options = {}) {
   const responseWaiters = new Map();
   const sendCalls = [];
   const chat = { id: "chat-1" };
+  const activeChat = options.activeChat || null;
+  const chats = options.chats || (activeChat ? [activeChat] : []);
 
   const widFactory = {
     createWid(value) {
@@ -21,7 +23,9 @@ function createHarness(options = {}) {
   const modules = {
     WAWebCollections: {
       Chat: {
-        get: () => chat
+        get: () => chat,
+        getActive: () => activeChat,
+        getModelsArray: () => chats
       }
     },
     WAWebWidFactory: widFactory,
@@ -36,6 +40,12 @@ function createHarness(options = {}) {
   const window = {
     WWebJS: {
       mediaInfoToFile: () => null,
+      async getChat(chatId) {
+        return chats.find((item) => item.id?._serialized === chatId) || null;
+      },
+      async getChatModel(modelChat) {
+        return modelChat.serialize ? modelChat.serialize() : modelChat;
+      },
       async sendMessage(targetChat, content, sendOptions) {
         sendCalls.push({ chat: targetChat, content, options: sendOptions });
         if (options.failText && !sendOptions.media) throw new Error("text send failed");
@@ -58,9 +68,15 @@ function createHarness(options = {}) {
       return modules[name];
     }
   };
+  const document = {
+    querySelector() {
+      return null;
+    }
+  };
 
   vm.runInNewContext(bridgeSource, {
     window,
+    document,
     File,
     Blob,
     Uint8Array,
@@ -234,4 +250,111 @@ test("quebra da consulta interna e classificada como fatal", async () => {
   assert.equal(result.status, "error");
   assert.equal(result.fatal, true);
   assert.equal(result.code, "engine_lookup_failed");
+});
+
+test("exporta numeros do grupo aberto", async () => {
+  const harness = createHarness({
+    activeChat: {
+      serialize() {
+        return {
+          isGroup: true,
+          formattedTitle: "Grupo teste",
+          groupMetadata: {
+            participants: [
+              { id: { _serialized: "5511999990000@c.us" } },
+              { id: "5585999998888@c.us" },
+              { id: "12345@lid" }
+            ]
+          }
+        };
+      }
+    }
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_EXPORT_OPEN_GROUP_PARTICIPANTS"
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(
+    result.participants.map((participant) => participant.phone).join(","),
+    "5511999990000,5585999998888"
+  );
+});
+
+test("lista grupos disponiveis no WhatsApp Web", async () => {
+  const harness = createHarness({
+    chats: [
+      {
+        id: { _serialized: "grupo-b@g.us" },
+        groupMetadata: {},
+        serialize() {
+          return {
+            id: { _serialized: "grupo-b@g.us" },
+            isGroup: true,
+            formattedTitle: "B Grupo",
+            groupMetadata: {
+              participants: [
+                { id: "5511999990000@c.us", isAdmin: true },
+                { id: "5585999998888@c.us" }
+              ]
+            }
+          };
+        }
+      },
+      {
+        id: { _serialized: "grupo-a@g.us" },
+        groupMetadata: {},
+        serialize() {
+          return {
+            id: { _serialized: "grupo-a@g.us" },
+            isGroup: true,
+            formattedTitle: "A Grupo",
+            groupMetadata: {
+              participants: [
+                { id: "5585888887777@c.us" }
+              ]
+            }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({ type: "ZAPSENDER_LIST_GROUPS" });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.groups.map((group) => group.title).join(","), "A Grupo,B Grupo");
+  assert.equal(result.groups.find((group) => group.title === "B Grupo").adminCount, 1);
+});
+
+test("exporta grupo escolhido sem admins quando solicitado", async () => {
+  const harness = createHarness({
+    chats: [
+      {
+        id: { _serialized: "grupo@g.us" },
+        groupMetadata: {},
+        serialize() {
+          return {
+            id: { _serialized: "grupo@g.us" },
+            isGroup: true,
+            formattedTitle: "Grupo escolhido",
+            groupMetadata: {
+              participants: [
+                { id: "5511999990000@c.us", isAdmin: true },
+                { id: "5585999998888@c.us" },
+                { id: "5585888887777@c.us", admin: "superadmin" }
+              ]
+            }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_EXPORT_GROUP_PARTICIPANTS",
+    groupId: "grupo@g.us",
+    includeAdmins: false
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.participants.map((participant) => participant.phone).join(","), "5585999998888");
 });

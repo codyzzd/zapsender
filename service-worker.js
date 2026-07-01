@@ -30,6 +30,27 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "WORKER_REQUEST" || !message.requestId) return false;
+  handleWorkerRequest(message.payload)
+    .then((result) => sendResponse({
+      type: "WORKER_RESPONSE",
+      requestId: message.requestId,
+      result
+    }))
+    .catch((error) => sendResponse({
+      type: "WORKER_RESPONSE",
+      requestId: message.requestId,
+      result: {
+        status: "error",
+        message: error.message,
+        code: error.code || "worker_error",
+        fatal: error.fatal === true
+      }
+    }));
+  return true;
+});
+
 async function handleWorkerRequest(message) {
   if (message?.type === "SEND_WHATSAPP_MESSAGE") {
     return sendToWhatsApp(message, message.focusTab === true);
@@ -51,6 +72,44 @@ async function handleWorkerRequest(message) {
       tabId: tab.id,
       title: tab.title || "",
       url: tab.url || ""
+    };
+  }
+  if (message?.type === "LIST_WHATSAPP_GROUPS") {
+    const tab = await prepareWhatsAppTab(false);
+    if (tab.status === "error") return tab;
+    const response = await sendContentRequest(tab.tabId, {
+      type: "ZAPSENDER_LIST_GROUPS",
+      bridgeTimeoutMs: 80000
+    }, 90000);
+    return {
+      ...response,
+      tabId: tab.tabId
+    };
+  }
+  if (message?.type === "EXPORT_GROUP_PARTICIPANTS") {
+    const tab = await prepareWhatsAppTab(false);
+    if (tab.status === "error") return tab;
+    const response = await sendContentRequest(tab.tabId, {
+      type: "ZAPSENDER_EXPORT_GROUP_PARTICIPANTS",
+      groupId: message.groupId,
+      includeAdmins: message.includeAdmins === true,
+      bridgeTimeoutMs: 100000
+    }, 120000);
+    return {
+      ...response,
+      tabId: tab.tabId
+    };
+  }
+  if (message?.type === "EXPORT_OPEN_GROUP_PARTICIPANTS") {
+    const tab = await prepareWhatsAppTab(false);
+    if (tab.status === "error") return tab;
+    const response = await sendContentRequest(tab.tabId, {
+      type: "ZAPSENDER_EXPORT_OPEN_GROUP_PARTICIPANTS",
+      bridgeTimeoutMs: 80000
+    }, 90000);
+    return {
+      ...response,
+      tabId: tab.tabId
     };
   }
   throw new Error("Comando desconhecido do Zapsender.");
@@ -236,7 +295,7 @@ function waitForTabLoaded(tabId) {
 async function ensureWhatsAppRuntime(tabId) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: "ZAPSENDER_PING" });
-    if (response?.status !== "ready" || response.version !== "1.2.0") {
+    if (response?.status !== "ready" || response.version !== "1.3.0") {
       throw new Error("Content script desatualizado.");
     }
   } catch (_error) {

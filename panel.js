@@ -1,7 +1,8 @@
 import { parseCsv, contactsToReportCsv } from "./src/csv.js";
-import { addCampaign, createCampaign, deleteCampaign, duplicateCampaignByStatuses, filterContactsByStatus, getActiveCampaign, getNextCampaignName, removeContact, renameCampaign, replaceActiveCampaign, withCampaignStats } from "./src/campaigns.js";
+import { addCampaign, addContact, createCampaign, deleteCampaign, duplicateCampaignByStatuses, filterContactsByStatus, getActiveCampaign, getNextCampaignName, removeContact, renameCampaign, replaceActiveCampaign, withCampaignStats } from "./src/campaigns.js";
 import { ATTACHMENT_ACCEPT, collectAttachmentIds, deleteUnreferencedAttachments, formatAttachmentSize, isAudioAttachment, refreshAttachmentAvailability, saveAttachment } from "./src/attachments.js";
 import { buildWaLink, getRandomMessageSelection, getSelectedMessageTemplate, normalizeMessageTemplates, renderMessage } from "./src/message.js";
+import { normalizePhone } from "./src/phone.js";
 import { getCurrentContact, getNextPendingIndex, getNextRunnableIndex, randomDelaySeconds, resetProgress, sanitizeSettings, setCurrentIndex, updateContactStatus } from "./src/queue.js";
 import { loadState, normalizeStoredState, saveState } from "./src/storage.js";
 
@@ -17,6 +18,12 @@ const els = {
   mode: document.querySelector("#mode"),
   csvFile: document.querySelector("#csv-file"),
   csvText: document.querySelector("#csv-text"),
+  loadGroupsBtn: document.querySelector("#load-groups-btn"),
+  whatsappGroupSelect: document.querySelector("#whatsapp-group-select"),
+  includeGroupAdmins: document.querySelector("#include-group-admins"),
+  downloadGroupCsvBtn: document.querySelector("#download-group-csv-btn"),
+  useGroupPreviewBtn: document.querySelector("#use-group-preview-btn"),
+  groupImportStatus: document.querySelector("#group-import-status"),
   previewImportBtn: document.querySelector("#preview-import-btn"),
   importBtn: document.querySelector("#import-btn"),
   importErrors: document.querySelector("#import-errors"),
@@ -58,6 +65,10 @@ const els = {
   resetModal: document.querySelector("#reset-modal"),
   contactsTable: document.querySelector("#contacts-table"),
   contactStatusFilter: document.querySelector("#contact-status-filter"),
+  manualContactForm: document.querySelector("#manual-contact-form"),
+  manualContactName: document.querySelector("#manual-contact-name"),
+  manualContactPhone: document.querySelector("#manual-contact-phone"),
+  manualContactError: document.querySelector("#manual-contact-error"),
   countdown: document.querySelector("#countdown"),
   readyAlert: document.querySelector("#ready-alert"),
   exportReportBtn: document.querySelector("#export-report-btn"),
@@ -77,9 +88,8 @@ let countdownRemaining = 0;
 let pendingImportContacts = [];
 let previewTimer = null;
 let sendSession = null;
-let workerPort = null;
 let workerRequestSequence = 0;
-const pendingWorkerRequests = new Map();
+let whatsappGroups = [];
 
 const ESTIMATED_SEND_MIN_SECONDS = 8;
 const ESTIMATED_SEND_MAX_SECONDS = 20;
@@ -239,6 +249,9 @@ function updateBusyState() {
   els.openNextBtn.disabled = busy;
   els.pauseBtn.disabled = !playing;
   els.checkWhatsappBtn.disabled = busy;
+  els.loadGroupsBtn.disabled = busy;
+  els.downloadGroupCsvBtn.disabled = busy || !els.whatsappGroupSelect.value;
+  els.useGroupPreviewBtn.disabled = busy || !els.whatsappGroupSelect.value;
   els.newCampaignBtn.disabled = busy;
 }
 
@@ -610,6 +623,31 @@ function renderNormalizationPreview(contacts = []) {
   els.normalizationTable.replaceChildren(...rows);
 }
 
+function setManualContactError(message = "") {
+  els.manualContactError.textContent = message;
+  els.manualContactError.hidden = !message;
+}
+
+async function addManualContact(event) {
+  event.preventDefault();
+  const name = els.manualContactName.value;
+  const phone = els.manualContactPhone.value;
+  const phoneInfo = normalizePhone(phone);
+
+  if (!phoneInfo.valid) {
+    setManualContactError(phoneInfo.reason);
+    els.manualContactPhone.focus();
+    return;
+  }
+
+  sendSession = null;
+  setActiveCampaign(addContact(activeCampaign(), { name, phone }));
+  await persist(state);
+  els.manualContactForm.reset();
+  setManualContactError("");
+  els.manualContactName.focus();
+}
+
 function previewCsv() {
   const csvText = els.csvText.value.trim();
   if (!csvText) {
@@ -621,6 +659,135 @@ function previewCsv() {
   const preview = parseCsv(csvText);
   renderImportErrors(preview.errors || []);
   renderNormalizationPreview(preview.contacts || []);
+}
+
+function renderWhatsAppGroups(groups = []) {
+  whatsappGroups = groups;
+  const options = groups.map((group) => {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = `${group.title || "Grupo sem nome"} (${group.participantCount || 0})`;
+    return option;
+  });
+
+  if (!options.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nenhum grupo encontrado";
+    els.whatsappGroupSelect.replaceChildren(option);
+    els.whatsappGroupSelect.disabled = true;
+  } else {
+    els.whatsappGroupSelect.replaceChildren(...options);
+    els.whatsappGroupSelect.disabled = false;
+  }
+
+  updateGroupImportStatus();
+  updateBusyState();
+}
+
+function updateGroupImportStatus(message = "") {
+  if (message) {
+    els.groupImportStatus.textContent = message;
+    return;
+  }
+
+  const selected = whatsappGroups.find((group) => group.id === els.whatsappGroupSelect.value);
+  els.groupImportStatus.textContent = selected
+    ? `${selected.participantCount || 0} participantes, ${selected.adminCount || 0} admins`
+    : "";
+}
+
+function groupCsvFromPhones(phones) {
+  return ["telefone", ...phones].join("\n");
+}
+
+function selectedGroupName() {
+  return whatsappGroups.find((group) => group.id === els.whatsappGroupSelect.value)?.title || "grupo-whatsapp";
+}
+
+function safeFilename(value) {
+  return String(value || "grupo-whatsapp")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "grupo-whatsapp";
+}
+
+function phonesFromGroupExport(result) {
+  return [...new Set((result.participants || [])
+    .map((participant) => String(participant.phone || "").replace(/\D/g, ""))
+    .filter(Boolean))];
+}
+
+async function loadWhatsAppGroups() {
+  if (busy) return;
+  busy = true;
+  updateBusyState();
+  setReadyAlert(false);
+  updateGroupImportStatus("Carregando grupos...");
+
+  try {
+    const result = await listWhatsAppGroups();
+    if (result.status !== "ok") {
+      renderWhatsAppGroups([]);
+      setReadyAlert(true, result.message || "Nao foi possivel carregar os grupos.", "error");
+      return;
+    }
+
+    renderWhatsAppGroups(result.groups || []);
+    setReadyAlert(true, `${result.groups?.length || 0} grupo${result.groups?.length === 1 ? "" : "s"} carregado${result.groups?.length === 1 ? "" : "s"}.`);
+  } catch (error) {
+    updateGroupImportStatus("");
+    setReadyAlert(true, error.message, "error");
+  } finally {
+    busy = false;
+    updateBusyState();
+  }
+}
+
+async function exportSelectedGroup({ download = false } = {}) {
+  if (busy) return;
+  const groupId = els.whatsappGroupSelect.value;
+  if (!groupId) {
+    setReadyAlert(true, "Carregue e escolha um grupo primeiro.", "error");
+    return;
+  }
+
+  busy = true;
+  updateBusyState();
+  setReadyAlert(false);
+  updateGroupImportStatus("Exportando participantes...");
+
+  try {
+    const result = await exportGroupParticipants(groupId, els.includeGroupAdmins.checked);
+    if (result.status !== "ok") {
+      setReadyAlert(true, result.message || "Nao foi possivel exportar o grupo.", "error");
+      return;
+    }
+
+    const phones = phonesFromGroupExport(result);
+    if (!phones.length) {
+      setReadyAlert(true, "Nenhum numero exportavel apareceu para esse grupo.", "error");
+      return;
+    }
+
+    const csv = groupCsvFromPhones(phones);
+    if (download) {
+      downloadText(`${safeFilename(result.title || selectedGroupName())}.csv`, csv, "text/csv;charset=utf-8");
+      setReadyAlert(true, `${phones.length} numero${phones.length === 1 ? "" : "s"} exportados para CSV.`);
+    } else {
+      els.csvText.value = csv;
+      previewCsv();
+      setReadyAlert(true, `${phones.length} numero${phones.length === 1 ? "" : "s"} adicionados na previa.`);
+    }
+    updateGroupImportStatus(`${phones.length} numeros exportaveis`);
+  } catch (error) {
+    setReadyAlert(true, error.message, "error");
+  } finally {
+    busy = false;
+    updateBusyState();
+  }
 }
 
 function schedulePreviewCsv() {
@@ -788,56 +955,35 @@ function checkWhatsAppTab() {
   return sendWorkerRequest({ type: "CHECK_WHATSAPP_TAB" }, 65000);
 }
 
+function listWhatsAppGroups() {
+  return sendWorkerRequest({ type: "LIST_WHATSAPP_GROUPS" }, 90000);
+}
+
+function exportGroupParticipants(groupId, includeAdmins) {
+  return sendWorkerRequest({ type: "EXPORT_GROUP_PARTICIPANTS", groupId, includeAdmins }, 120000);
+}
+
 function sendWorkerRequest(payload, timeoutMs) {
-  const port = getWorkerPort();
   const requestId = `request-${Date.now()}-${workerRequestSequence += 1}`;
 
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingWorkerRequests.delete(requestId);
       reject(new Error("A extensao demorou demais para responder. Recarregue a extensao e tente novamente."));
     }, timeoutMs);
 
-    pendingWorkerRequests.set(requestId, {
-      resolve: (result) => {
-        clearTimeout(timeout);
-        resolve(result);
-      },
-      reject: (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      }
-    });
-
-    try {
-      port.postMessage({ type: "WORKER_REQUEST", requestId, payload });
-    } catch (error) {
+    chrome.runtime.sendMessage({ type: "WORKER_REQUEST", requestId, payload }, (message) => {
       clearTimeout(timeout);
-      pendingWorkerRequests.delete(requestId);
-      reject(error);
-    }
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message || "A conexao com a extensao foi interrompida."));
+        return;
+      }
+      if (message?.type !== "WORKER_RESPONSE" || message.requestId !== requestId) {
+        reject(new Error("Resposta inesperada da extensao."));
+        return;
+      }
+      resolve(message.result);
+    });
   });
-}
-
-function getWorkerPort() {
-  if (workerPort) return workerPort;
-  workerPort = chrome.runtime.connect({ name: "zapsender-worker" });
-  workerPort.onMessage.addListener((message) => {
-    if (message?.type !== "WORKER_RESPONSE") return;
-    const pending = pendingWorkerRequests.get(message.requestId);
-    if (!pending) return;
-    pendingWorkerRequests.delete(message.requestId);
-    pending.resolve(message.result);
-  });
-  workerPort.onDisconnect.addListener(() => {
-    const runtimeMessage = chrome.runtime.lastError?.message || "A conexao com a extensao foi interrompida.";
-    workerPort = null;
-    for (const [requestId, pending] of pendingWorkerRequests) {
-      pendingWorkerRequests.delete(requestId);
-      pending.reject(new Error(runtimeMessage));
-    }
-  });
-  return workerPort;
 }
 
 function clearCountdown() {
@@ -1038,7 +1184,17 @@ els.csvFile.addEventListener("change", async () => {
 });
 
 els.csvText.addEventListener("input", schedulePreviewCsv);
+els.loadGroupsBtn.addEventListener("click", loadWhatsAppGroups);
+els.whatsappGroupSelect.addEventListener("change", () => {
+  updateGroupImportStatus();
+  updateBusyState();
+});
+els.includeGroupAdmins.addEventListener("change", updateGroupImportStatus);
+els.downloadGroupCsvBtn.addEventListener("click", () => exportSelectedGroup({ download: true }));
+els.useGroupPreviewBtn.addEventListener("click", () => exportSelectedGroup({ download: false }));
 els.previewImportBtn.addEventListener("click", previewCsv);
+els.manualContactForm.addEventListener("submit", addManualContact);
+els.manualContactPhone.addEventListener("input", () => setManualContactError(""));
 
 els.importBtn.addEventListener("click", async () => {
   sendSession = null;

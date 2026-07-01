@@ -4,7 +4,7 @@
  * under Apache-2.0. See third_party/WHATSAPP_WEB_JS_LICENSE.txt.
  */
 (() => {
-  const ENGINE_VERSION = "1.2.0";
+  const ENGINE_VERSION = "1.3.0";
   const REQUEST_SOURCE = "zapsender-content";
   const RESPONSE_SOURCE = "zapsender-main";
   const transfers = new Map();
@@ -66,6 +66,18 @@
 
     if (payload.type === "ZAPSENDER_SEND_DIRECT") {
       return sendDirect(payload.phone, payload.text || "");
+    }
+
+    if (payload.type === "ZAPSENDER_LIST_GROUPS") {
+      return listGroups();
+    }
+
+    if (payload.type === "ZAPSENDER_EXPORT_GROUP_PARTICIPANTS") {
+      return exportGroupParticipants(payload.groupId, payload.includeAdmins === true);
+    }
+
+    if (payload.type === "ZAPSENDER_EXPORT_OPEN_GROUP_PARTICIPANTS") {
+      return exportOpenGroupParticipants();
     }
 
     if (payload.type === "ZAPSENDER_MEDIA_COMMIT") {
@@ -218,6 +230,305 @@
       mediaMessageId: getMessageId(mediaMessage),
       phone: target.phone
     };
+  }
+
+  async function exportOpenGroupParticipants() {
+    const visibleParticipants = collectParticipantPhonesFromDom();
+    const chat = await resolveOpenChat();
+    if (!chat) {
+      if (visibleParticipants.length) {
+        return {
+          status: "ok",
+          title: getVisibleChatTitle(),
+          source: "dom",
+          participants: visibleParticipants
+        };
+      }
+      return {
+        status: "error",
+        message: "Abra o grupo no WhatsApp Web antes de buscar os numeros. Se ja estiver aberto, clique no cabecalho do grupo para mostrar os participantes e tente de novo.",
+        code: "open_group_not_found"
+      };
+    }
+
+    const model = await window.WWebJS.getChatModel(chat);
+    if (!model?.isGroup || !model.groupMetadata) {
+      if (visibleParticipants.length) {
+        return {
+          status: "ok",
+          title: getVisibleChatTitle(),
+          source: "dom",
+          participants: visibleParticipants
+        };
+      }
+      return {
+        status: "error",
+        message: "A conversa aberta nao parece ser um grupo.",
+        code: "open_chat_not_group"
+      };
+    }
+
+    const participants = (model.groupMetadata.participants || [])
+      .map((participant) => {
+        const id = participant?.id;
+        const serialized = typeof id === "string"
+          ? id
+          : id?._serialized || id?.toString?.() || "";
+        const phone = extractPhoneFromWid(serialized || participant?.phone || participant?.user);
+        return phone ? { phone } : null;
+      })
+      .filter(Boolean);
+    const participantMap = new Map();
+    for (const participant of [...participants, ...visibleParticipants]) {
+      participantMap.set(participant.phone, participant);
+    }
+
+    return {
+      status: "ok",
+      title: model.formattedTitle || model.name || "",
+      source: visibleParticipants.length ? "mixed" : "internal",
+      participants: [...participantMap.values()]
+    };
+  }
+
+  async function listGroups() {
+    const Chat = requireModule("WAWebCollections").Chat;
+    const chats = typeof Chat.getModelsArray === "function" ? Chat.getModelsArray() : [];
+    const groups = [];
+
+    for (const chat of chats) {
+      if (!chat?.groupMetadata) continue;
+      try {
+        const model = await window.WWebJS.getChatModel(chat);
+        if (!model?.isGroup || !model.groupMetadata) continue;
+        const participants = normalizeParticipants(model.groupMetadata.participants || [], true);
+        groups.push({
+          id: model.id?._serialized || chat.id?._serialized || chat.id?.toString?.() || "",
+          title: model.formattedTitle || model.name || chat.formattedTitle || chat.name || "Grupo sem nome",
+          participantCount: participants.length,
+          adminCount: participants.filter((participant) => participant.isAdmin).length
+        });
+      } catch (_error) {
+        // Um grupo com metadata quebrada nao deve impedir a lista inteira.
+      }
+    }
+
+    groups.sort((a, b) => a.title.localeCompare(b.title, "pt-BR"));
+    return {
+      status: "ok",
+      groups: groups.filter((group) => group.id)
+    };
+  }
+
+  async function exportGroupParticipants(groupId, includeAdmins) {
+    const chat = await findGroupChatById(groupId);
+    if (!chat) {
+      return {
+        status: "error",
+        message: "Grupo nao encontrado na aba atual do WhatsApp Web.",
+        code: "group_not_found"
+      };
+    }
+
+    const model = await window.WWebJS.getChatModel(chat);
+    if (!model?.isGroup || !model.groupMetadata) {
+      return {
+        status: "error",
+        message: "A conversa escolhida nao parece ser um grupo.",
+        code: "selected_chat_not_group"
+      };
+    }
+
+    const participants = normalizeParticipants(model.groupMetadata.participants || [], includeAdmins);
+    return {
+      status: "ok",
+      title: model.formattedTitle || model.name || "",
+      participants
+    };
+  }
+
+  async function findGroupChatById(groupId) {
+    const id = String(groupId || "");
+    if (!id) return null;
+
+    if (typeof window.WWebJS?.getChat === "function") {
+      try {
+        const chat = await window.WWebJS.getChat(id, { getAsModel: false });
+        if (chat?.groupMetadata) return chat;
+      } catch (_error) {
+        // Tenta colecao abaixo.
+      }
+    }
+
+    const Chat = requireModule("WAWebCollections").Chat;
+    const chats = typeof Chat.getModelsArray === "function" ? Chat.getModelsArray() : [];
+    return chats.find((chat) => {
+      const serialized = chat.id?._serialized || chat.id?.toString?.() || "";
+      return serialized === id && chat.groupMetadata;
+    }) || null;
+  }
+
+  function normalizeParticipants(rawParticipants, includeAdmins) {
+    const byPhone = new Map();
+    for (const participant of rawParticipants) {
+      const phone = extractParticipantPhone(participant);
+      if (!phone) continue;
+      const isAdmin = isGroupAdmin(participant);
+      if (isAdmin && !includeAdmins) continue;
+      byPhone.set(phone, { phone, isAdmin });
+    }
+    return [...byPhone.values()];
+  }
+
+  function extractParticipantPhone(participant) {
+    const id = participant?.id;
+    const serialized = typeof id === "string"
+      ? id
+      : id?._serialized || id?.user || id?.toString?.() || "";
+    return extractPhoneFromWid(
+      serialized ||
+      participant?.phoneNumber ||
+      participant?.phone ||
+      participant?.user ||
+      participant?.jid
+    );
+  }
+
+  function isGroupAdmin(participant) {
+    return participant?.isAdmin === true ||
+      participant?.isSuperAdmin === true ||
+      participant?.admin === "admin" ||
+      participant?.admin === "superadmin" ||
+      participant?.rank === "admin" ||
+      participant?.rank === "superadmin";
+  }
+
+  async function resolveOpenChat() {
+    const Chat = requireModule("WAWebCollections").Chat;
+    const directCandidates = [
+      callMaybe(Chat, "getActive"),
+      callMaybe(Chat, "getActiveChat"),
+      Chat.active,
+      Chat._active,
+      Chat.activeChat,
+      Chat.selected,
+      Chat._selected
+    ].filter(Boolean);
+
+    let fallbackChat = null;
+    for (const candidate of directCandidates) {
+      try {
+        const chat = await unwrapChat(candidate);
+        if (chat?.groupMetadata) return chat;
+        if (chat && !fallbackChat) fallbackChat = chat;
+      } catch (_error) {
+        // Continua tentando outras formas de descobrir a conversa visivel.
+      }
+    }
+
+    const visibleTitle = getVisibleChatTitle();
+    const chats = typeof Chat.getModelsArray === "function" ? Chat.getModelsArray() : [];
+    if (visibleTitle && chats.length) {
+      const normalizedVisible = normalizeTitle(visibleTitle);
+      const matches = chats.filter((chat) => {
+        if (!chat?.groupMetadata) return false;
+        return chatTitleCandidates(chat).some((title) => normalizeTitle(title) === normalizedVisible);
+      });
+      if (matches.length === 1) return matches[0];
+    }
+
+    return fallbackChat;
+  }
+
+  function callMaybe(target, method) {
+    try {
+      return typeof target?.[method] === "function" ? target[method]() : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async function unwrapChat(candidate) {
+    const value = typeof candidate?.then === "function" ? await candidate : candidate;
+    return value?.chat || value?.model || value || null;
+  }
+
+  function getVisibleChatTitle() {
+    const selectors = [
+      "#main header span[title]",
+      "#main header [title]",
+      "#main header span[dir='auto']",
+      "main header span[title]",
+      "main header [title]",
+      "main header span[dir='auto']",
+      "header span[title]",
+      "[data-testid='conversation-info-header'] span[title]",
+      "[data-testid='conversation-header'] span[title]"
+    ];
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      const title = element?.getAttribute("title") || element?.textContent || "";
+      if (title.trim()) return title.trim();
+    }
+    return "";
+  }
+
+  function collectParticipantPhonesFromDom() {
+    const values = new Set();
+    const selectors = [
+      "[data-testid='group-info-drawer']",
+      "[data-testid='chat-info-drawer']",
+      "[aria-label*='Group info']",
+      "[aria-label*='Dados do grupo']",
+      "[aria-label*='Informacoes do grupo']",
+      "aside",
+      "#main"
+    ];
+    const roots = selectors
+      .map((selector) => document.querySelector(selector))
+      .filter(Boolean);
+    if (!roots.length && document.body) roots.push(document.body);
+
+    for (const root of roots) {
+      collectPhoneText(root.textContent, values);
+      for (const element of root.querySelectorAll("[title], [aria-label]")) {
+        collectPhoneText(element.getAttribute("title"), values);
+        collectPhoneText(element.getAttribute("aria-label"), values);
+      }
+    }
+
+    return [...values].map((phone) => ({ phone }));
+  }
+
+  function collectPhoneText(text, values) {
+    const source = String(text || "");
+    const matches = source.match(/(?:\+?\d[\s().-]*){10,16}/g) || [];
+    for (const match of matches) {
+      const phone = match.replace(/\D/g, "");
+      if (phone.length >= 10 && phone.length <= 15) values.add(phone);
+    }
+  }
+
+  function chatTitleCandidates(chat) {
+    return [
+      chat.formattedTitle,
+      chat.name,
+      chat.title,
+      chat.contact?.formattedName,
+      chat.contact?.name,
+      chat.contact?.pushname
+    ].filter(Boolean);
+  }
+
+  function normalizeTitle(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function extractPhoneFromWid(value) {
+    const text = String(value || "");
+    const user = text.includes("@") ? text.split("@")[0] : text;
+    const digits = user.replace(/\D/g, "");
+    return digits.length >= 10 ? digits : "";
   }
 
   function mediaOptions(media, sendAsVoice) {

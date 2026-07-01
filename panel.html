@@ -88,6 +88,27 @@
           </div>
         </div>
 
+        <div class="group-import">
+          <div class="group-import-controls">
+            <button id="load-groups-btn" type="button">Carregar grupos do WhatsApp</button>
+            <label>
+              Grupo
+              <select id="whatsapp-group-select" disabled>
+                <option value="">Nenhum grupo carregado</option>
+              </select>
+            </label>
+            <label class="checkbox-row">
+              <input id="include-group-admins" type="checkbox" checked>
+              <span>Incluir admins</span>
+            </label>
+          </div>
+          <div class="group-import-actions">
+            <button id="download-group-csv-btn" type="button" disabled>Baixar CSV do grupo</button>
+            <button id="use-group-preview-btn" type="button" disabled>Usar na previa</button>
+            <span id="group-import-status" class="inline-status"></span>
+          </div>
+        </div>
+
         <div class="import-grid">
           <label class="file-drop">
             <input id="csv-file" type="file" accept=".csv,text/csv">
@@ -294,7 +315,7 @@
         <div class="panel-heading">
           <div>
             <h2>Previa e fila</h2>
-            <p>Filtre por status, selecione uma linha ou remova contatos antes de dar Play.</p>
+            <p>Filtre por status, selecione uma linha, adicione ou remova contatos antes de dar Play.</p>
           </div>
           <div class="heading-actions">
             <label class="compact-label">
@@ -310,6 +331,18 @@
             </label>
           </div>
         </div>
+        <form id="manual-contact-form" class="manual-contact-form">
+          <label>
+            Nome
+            <input id="manual-contact-name" type="text" autocomplete="off" placeholder="Ana">
+          </label>
+          <label>
+            Telefone
+            <input id="manual-contact-phone" type="text" inputmode="tel" autocomplete="off" placeholder="(85) 99999-9999" required>
+          </label>
+          <button type="submit" class="primary">Adicionar contato</button>
+          <span id="manual-contact-error" class="inline-error" hidden></span>
+        </form>
         <div class="table-wrap">
           <table>
             <thead>

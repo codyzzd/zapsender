@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_VERSION = "1.2.0";
+  const CONTENT_VERSION = "1.3.0";
   const REQUEST_SOURCE = "zapsender-content";
   const RESPONSE_SOURCE = "zapsender-main";
 

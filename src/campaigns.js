@@ -1,5 +1,6 @@
 import { getStats, sanitizeSettings } from "./queue.js";
 import { DEFAULT_NAME_FORMAT, normalizeMessageTemplates, normalizeNameFormat } from "./message.js";
+import { normalizePhone } from "./phone.js";
 
 export const STATUS_FILTERS = [
   { value: "all", label: "Todos" },
@@ -175,6 +176,27 @@ export function removeContact(campaign, contactId) {
   const contacts = campaign.contacts.filter((contact) => contact.id !== contactId);
   const currentIndex = Math.min(campaign.currentIndex, Math.max(0, contacts.length - 1));
   return touchCampaign({ ...campaign, contacts, currentIndex });
+}
+
+export function addContact(campaign, contact) {
+  const phoneInfo = normalizePhone(contact?.phone || contact?.phoneOriginal || contact?.phoneDisplay || contact?.phoneNormalized || "");
+  const normalizedContact = {
+    id: createId("contact"),
+    name: String(contact?.name || "").trim(),
+    phoneOriginal: phoneInfo.original,
+    phoneNormalized: phoneInfo.normalized,
+    phoneDisplay: phoneInfo.display,
+    valid: phoneInfo.valid,
+    invalidReason: phoneInfo.reason,
+    status: phoneInfo.valid ? "pendente" : "erro",
+    lastActionAt: null,
+    openedAt: null,
+    sentAt: null,
+    skippedAt: null,
+    error: phoneInfo.valid ? "" : phoneInfo.reason
+  };
+  const contacts = [...(campaign.contacts || []), normalizedContact];
+  return touchCampaign({ ...campaign, source: campaign.source || "manual", contacts });
 }
 
 export function duplicateCampaignByStatuses(appState, sourceCampaign, statuses, name) {
