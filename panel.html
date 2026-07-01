@@ -19,6 +19,11 @@
         <button id="new-campaign-btn" type="button" class="primary sidebar-primary">Nova campanha</button>
       </div>
 
+      <nav class="sidebar-nav" aria-label="Areas do Zapsender">
+        <button id="nav-campaigns-btn" type="button" class="selected" data-view="campaigns">Disparos</button>
+        <button id="nav-groups-btn" type="button" data-view="groups">Grupos</button>
+      </nav>
+
       <div class="sidebar-section-heading">
         <span>Disparos</span>
         <strong id="campaign-count">0</strong>
@@ -40,7 +45,7 @@
       </div>
     </aside>
 
-    <main class="campaign-workspace">
+    <main id="campaigns-view" class="campaign-workspace app-view">
       <header class="topbar">
         <div>
           <span class="eyebrow">Campanha ativa</span>
@@ -356,6 +361,134 @@
               </tr>
             </thead>
             <tbody id="contacts-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <main id="groups-view" class="campaign-workspace app-view" hidden>
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">Grupos</span>
+          <h1>Adicionar membros</h1>
+          <p>Escolha um grupo, normalize a lista, valide os numeros no WhatsApp e rode a adicao com intervalo.</p>
+        </div>
+        <button id="groups-check-whatsapp-btn" type="button">Verificar WhatsApp</button>
+      </header>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Grupo e contatos</h2>
+            <p>Todo telefone sera normalizado antes da validacao e antes de qualquer tentativa de adicao.</p>
+          </div>
+          <div class="heading-actions">
+            <button id="groups-load-btn" type="button">Carregar grupos</button>
+            <button id="groups-validate-btn" type="button" class="primary">Validar lista</button>
+          </div>
+        </div>
+
+        <div class="group-tool-grid">
+          <label>
+            Grupo
+            <select id="groups-target-select" disabled>
+              <option value="">Nenhum grupo carregado</option>
+            </select>
+          </label>
+          <div class="group-tool-status">
+            <strong id="groups-whatsapp-status">Nao verificado</strong>
+            <span id="groups-selected-status">Carregue os grupos do WhatsApp Web.</span>
+          </div>
+        </div>
+
+        <div class="import-grid">
+          <label class="file-drop">
+            <input id="groups-csv-file" type="file" accept=".csv,text/csv">
+            <span>Selecionar CSV de contatos</span>
+          </label>
+          <label class="textarea-label">
+            <span>Ou cole os telefones/CSV</span>
+            <textarea id="groups-contacts-text" placeholder="telefone&#10;(85) 99999-9999&#10;85988887777"></textarea>
+          </label>
+        </div>
+        <div id="groups-errors" class="error-list" hidden></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Execucao</h2>
+            <p id="groups-run-label">Valide a lista antes de iniciar.</p>
+          </div>
+          <div id="groups-countdown" class="countdown" hidden></div>
+        </div>
+
+        <div class="interval-grid">
+          <label>
+            Delay minimo (s)
+            <input id="groups-min-delay" type="number" min="3" step="1" value="10">
+          </label>
+          <label>
+            Delay maximo (s)
+            <input id="groups-max-delay" type="number" min="3" step="1" value="10">
+          </label>
+        </div>
+
+        <div id="groups-progress" class="send-progress" aria-live="polite">
+          <div class="send-progress-heading">
+            <div>
+              <span id="groups-progress-status">Aguardando validacao</span>
+              <strong id="groups-progress-percent">0%</strong>
+            </div>
+            <span id="groups-progress-count">0 de 0 concluidos</span>
+          </div>
+          <div
+            id="groups-progress-track"
+            class="send-progress-track"
+            role="progressbar"
+            aria-label="Progresso da adicao"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <span id="groups-progress-bar"></span>
+          </div>
+          <div class="send-progress-details">
+            <span id="groups-progress-estimate">Nenhum contato validado.</span>
+            <span id="groups-progress-finish"></span>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button id="groups-start-btn" type="button" class="primary" disabled>Iniciar adicao automatica</button>
+          <button id="groups-pause-btn" type="button" disabled>Pausar</button>
+          <button id="groups-reset-btn" type="button" class="danger">Limpar lista</button>
+          <button id="groups-export-btn" type="button" disabled>Exportar relatorio CSV</button>
+        </div>
+
+        <div id="groups-alert" class="ready-alert" hidden></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Lista normalizada</h2>
+            <p>Somente contatos com status <strong>valido</strong> entram na fila de adicao.</p>
+          </div>
+          <span id="groups-summary" class="counter">0 contatos</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Original</th>
+                <th>Normalizado</th>
+                <th>Status</th>
+                <th>Detalhe</th>
+                <th>Ultima acao</th>
+              </tr>
+            </thead>
+            <tbody id="groups-table"></tbody>
           </table>
         </div>
       </section>

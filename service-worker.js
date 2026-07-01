@@ -112,6 +112,33 @@ async function handleWorkerRequest(message) {
       tabId: tab.tabId
     };
   }
+  if (message?.type === "VALIDATE_WHATSAPP_PHONE") {
+    const tab = await prepareWhatsAppTab(false);
+    if (tab.status === "error") return tab;
+    const response = await sendContentRequest(tab.tabId, {
+      type: "ZAPSENDER_VALIDATE_PHONE",
+      phone: message.phone,
+      bridgeTimeoutMs: 80000
+    }, 90000);
+    return {
+      ...response,
+      tabId: tab.tabId
+    };
+  }
+  if (message?.type === "ADD_GROUP_PARTICIPANT") {
+    const tab = await prepareWhatsAppTab(false);
+    if (tab.status === "error") return tab;
+    const response = await sendContentRequest(tab.tabId, {
+      type: "ZAPSENDER_ADD_GROUP_PARTICIPANT",
+      groupId: message.groupId,
+      phone: message.phone,
+      bridgeTimeoutMs: 100000
+    }, 120000);
+    return {
+      ...response,
+      tabId: tab.tabId
+    };
+  }
   throw new Error("Comando desconhecido do Zapsender.");
 }
 

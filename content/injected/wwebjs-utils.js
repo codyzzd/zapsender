@@ -1445,34 +1445,40 @@ window.ZapsenderLoadWWebUtils = () => {
             code: undefined,
             inviteV4Code: undefined,
             inviteV4CodeExp: undefined,
+            errorMessage: undefined,
         };
 
         try {
             rpcResult = await window
                 .require('WASmaxGroupsAddParticipantsRPC')
                 .sendAddParticipantsRPC({ participantArgs, iqTo });
-            resultArgs =
-                rpcResult.value.addParticipant[0]
-                    .addParticipantsParticipantAddedOrNonRegisteredWaUserParticipantErrorLidResponseMixinGroup
-                    .value.addParticipantsParticipantMixins;
         } catch (ignoredError) {
             data.code = 400;
+            data.errorMessage =
+                ignoredError?.message ||
+                ignoredError?.name ||
+                String(ignoredError || 'Falha interna ao chamar RPC de adicionar participante');
             return data;
         }
 
+        resultArgs =
+            rpcResult?.value?.addParticipant?.[0]
+                ?.addParticipantsParticipantAddedOrNonRegisteredWaUserParticipantErrorLidResponseMixinGroup
+                ?.value?.addParticipantsParticipantMixins;
+
         if (rpcResult.name === 'AddParticipantsResponseSuccess') {
-            const code = resultArgs?.value.error || '200';
-            data.name = resultArgs?.name;
+            const code = resultArgs?.value?.error || resultArgs?.value?.code || '200';
+            data.name = resultArgs?.name || rpcResult.name;
             data.code = +code;
-            data.inviteV4Code = resultArgs?.value.addRequestCode;
+            data.inviteV4Code = resultArgs?.value?.addRequestCode;
             data.inviteV4CodeExp =
-                resultArgs?.value.addRequestExpiration?.toString();
+                resultArgs?.value?.addRequestExpiration?.toString();
         } else if (rpcResult.name === 'AddParticipantsResponseClientError') {
             const { code: code } =
-                rpcResult.value.errorAddParticipantsClientErrors.value;
+                rpcResult.value?.errorAddParticipantsClientErrors?.value || {};
             data.code = +code;
         } else if (rpcResult.name === 'AddParticipantsResponseServerError') {
-            const { code: code } = rpcResult.value.errorServerErrors.value;
+            const { code: code } = rpcResult.value?.errorServerErrors?.value || {};
             data.code = +code;
         }
 

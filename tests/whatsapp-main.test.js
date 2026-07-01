@@ -16,8 +16,8 @@ function createHarness(options = {}) {
 
   const widFactory = {
     createWid(value) {
-      const user = String(value).split("@")[0];
-      return { user, server: "c.us", _serialized: `${user}@c.us` };
+      const [user, server = "c.us"] = String(value).split("@");
+      return { user, server, _serialized: `${user}@${server}` };
     }
   };
   const modules = {
@@ -50,7 +50,8 @@ function createHarness(options = {}) {
         sendCalls.push({ chat: targetChat, content, options: sendOptions });
         if (options.failText && !sendOptions.media) throw new Error("text send failed");
         return { id: { _serialized: `message-${sendCalls.length}` } };
-      }
+      },
+      ...(options.wweb || {})
     },
     ZapsenderLoadWWebUtils() {},
     addEventListener(type, listener) {
@@ -130,6 +131,159 @@ test("numero inexistente nao tenta enviar", async () => {
   assert.equal(result.status, "error");
   assert.equal(result.code, "invalid_number");
   assert.equal(harness.sendCalls.length, 0);
+});
+
+test("valida numero existente sem enviar mensagem", async () => {
+  const harness = createHarness();
+  const result = await harness.request({
+    type: "ZAPSENDER_VALIDATE_PHONE",
+    phone: "55 (11) 99999-0000"
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.exists, true);
+  assert.equal(result.phone, "5511999990000");
+  assert.equal(harness.sendCalls.length, 0);
+});
+
+test("adiciona participante validado ao grupo", async () => {
+  const harness = createHarness({
+    wweb: {
+      async getAddParticipantsRpcResult(groupWid, participantWid) {
+        assert.equal(groupWid._serialized, "grupo@g.us");
+        assert.equal(participantWid._serialized, "5511999990000@c.us");
+        return { code: 200 };
+      }
+    },
+    chats: [
+      {
+        id: { _serialized: "grupo@g.us" },
+        groupMetadata: {},
+        serialize() {
+          return {
+            id: { _serialized: "grupo@g.us" },
+            isGroup: true,
+            formattedTitle: "Grupo escolhido",
+            groupMetadata: {
+              participants: [
+                { id: "5585999998888@c.us" }
+              ]
+            }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_ADD_GROUP_PARTICIPANT",
+    groupId: "grupo@g.us",
+    phone: "5511999990000"
+  });
+
+  assert.equal(result.status, "added");
+  assert.equal(result.phone, "5511999990000");
+});
+
+test("usa lid do participante quando o grupo exige lid addressing", async () => {
+  const harness = createHarness({
+    wweb: {
+      async enforceLidAndPnRetrieval(userId) {
+        assert.equal(userId, "5511999990000@c.us");
+        return {
+          lid: { user: "123456789", server: "lid", _serialized: "123456789@lid" }
+        };
+      },
+      async getAddParticipantsRpcResult(_groupWid, participantWid) {
+        assert.equal(participantWid._serialized, "123456789@lid");
+        return { code: 200 };
+      }
+    },
+    chats: [
+      {
+        id: { _serialized: "grupo@g.us" },
+        groupMetadata: {},
+        serialize() {
+          return {
+            id: { _serialized: "grupo@g.us" },
+            isGroup: true,
+            formattedTitle: "Grupo LID",
+            groupMetadata: {
+              isLidAddressingMode: true,
+              participants: []
+            }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_ADD_GROUP_PARTICIPANT",
+    groupId: "grupo@g.us",
+    phone: "5511999990000"
+  });
+
+  assert.equal(result.status, "added");
+});
+
+test("bloqueia adicao quando a conta nao e admin do grupo", async () => {
+  const harness = createHarness({
+    chats: [
+      {
+        id: { _serialized: "grupo@g.us" },
+        groupMetadata: {},
+        iAmAdmin: () => false,
+        serialize() {
+          return {
+            id: { _serialized: "grupo@g.us" },
+            isGroup: true,
+            formattedTitle: "Grupo sem admin",
+            groupMetadata: { participants: [] }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_ADD_GROUP_PARTICIPANT",
+    groupId: "grupo@g.us",
+    phone: "5511999990000"
+  });
+
+  assert.equal(result.status, "not_authorized");
+  assert.equal(result.code, "i_am_not_admin");
+});
+
+test("mapeia codigo 403 como convite necessario", async () => {
+  const harness = createHarness({
+    wweb: {
+      async getAddParticipantsRpcResult() {
+        return { code: 403 };
+      }
+    },
+    chats: [
+      {
+        id: { _serialized: "grupo@g.us" },
+        groupMetadata: {},
+        iAmAdmin: () => true,
+        serialize() {
+          return {
+            id: { _serialized: "grupo@g.us" },
+            isGroup: true,
+            formattedTitle: "Grupo escolhido",
+            groupMetadata: { participants: [] }
+          };
+        }
+      }
+    ]
+  });
+  const result = await harness.request({
+    type: "ZAPSENDER_ADD_GROUP_PARTICIPANT",
+    groupId: "grupo@g.us",
+    phone: "5511999990000"
+  });
+
+  assert.equal(result.status, "needs_invite");
+  assert.equal(result.code, "403");
 });
 
 test("imagem e enviada como midia normal antes do texto separado", async () => {

@@ -80,6 +80,14 @@
       return exportOpenGroupParticipants();
     }
 
+    if (payload.type === "ZAPSENDER_VALIDATE_PHONE") {
+      return validatePhone(payload.phone);
+    }
+
+    if (payload.type === "ZAPSENDER_ADD_GROUP_PARTICIPANT") {
+      return addGroupParticipant(payload.groupId, payload.phone);
+    }
+
     if (payload.type === "ZAPSENDER_MEDIA_COMMIT") {
       try {
         return await sendMediaAndText(
@@ -347,6 +355,197 @@
     };
   }
 
+  async function validatePhone(phone) {
+    const target = await lookupPhone(phone);
+    if (!target) {
+      return {
+        status: "ok",
+        exists: false,
+        message: "Numero nao encontrado no WhatsApp",
+        phone: String(phone || "").replace(/\D/g, "")
+      };
+    }
+    return {
+      status: "ok",
+      exists: true,
+      phone: target.phone,
+      wid: target.wid?._serialized || target.wid?.toString?.() || ""
+    };
+  }
+
+  async function addGroupParticipant(groupId, phone) {
+    const chat = await findGroupChatById(groupId);
+    if (!chat) {
+      return {
+        status: "error",
+        message: "Grupo nao encontrado na aba atual do WhatsApp Web.",
+        code: "group_not_found"
+      };
+    }
+
+    await refreshGroupMetadata(groupId);
+    const model = await window.WWebJS.getChatModel(chat);
+    if (!model?.isGroup || !model.groupMetadata) {
+      return {
+        status: "error",
+        message: "A conversa escolhida nao parece ser um grupo.",
+        code: "selected_chat_not_group"
+      };
+    }
+
+    if (typeof chat.iAmAdmin === "function" && !chat.iAmAdmin()) {
+      return {
+        status: "not_authorized",
+        message: "Sua conta nao tem permissao de admin para adicionar participantes neste grupo.",
+        code: "i_am_not_admin"
+      };
+    }
+
+    const target = await lookupPhone(phone);
+    if (!target) {
+      return {
+        status: "not_found",
+        message: "Numero nao encontrado no WhatsApp",
+        code: "invalid_number"
+      };
+    }
+
+    const participants = normalizeParticipants(model.groupMetadata.participants || [], true);
+    if (participants.some((participant) => String(participant.phone || "") === String(target.phone || ""))) {
+      return {
+        status: "already_member",
+        message: "Numero ja estava no grupo.",
+        phone: target.phone
+      };
+    }
+
+    if (typeof window.WWebJS?.getAddParticipantsRpcResult !== "function") {
+      throw requestError("Funcao interna de adicionar participante nao esta disponivel.", "add_participant_unavailable");
+    }
+
+    const WidFactory = requireModule("WAWebWidFactory");
+    const groupWid = WidFactory.createWid(groupId);
+    const participantWid = await resolveParticipantWidForGroup(model, target);
+    const result = await window.WWebJS.getAddParticipantsRpcResult(groupWid, participantWid);
+    return mapAddParticipantResult(result, target.phone);
+  }
+
+  async function refreshGroupMetadata(groupId) {
+    try {
+      const query = safeRequire("WAWebGroupQueryJob");
+      if (typeof query?.queryAndUpdateGroupMetadataById === "function") {
+        await query.queryAndUpdateGroupMetadataById({ id: groupId });
+      }
+    } catch (_error) {
+      // Metadata stale nao deve impedir a tentativa de adicionar.
+    }
+  }
+
+  async function resolveParticipantWidForGroup(model, target) {
+    const useLid = model?.groupMetadata?.isLidAddressingMode === true;
+    if (!useLid || typeof window.WWebJS?.enforceLidAndPnRetrieval !== "function") return target.wid;
+
+    try {
+      const serialized = target.wid?._serialized || target.wid?.toString?.() || "";
+      const resolved = await window.WWebJS.enforceLidAndPnRetrieval(serialized);
+      return resolved?.lid || target.wid;
+    } catch (_error) {
+      return target.wid;
+    }
+  }
+
+  function mapAddParticipantResult(result, phone) {
+    const code = Number(result?.code);
+    if (code === 200) {
+      return {
+        status: "added",
+        message: "Participante adicionado ao grupo.",
+        phone
+      };
+    }
+    if (result?.inviteV4Code) {
+      return {
+        status: "needs_invite",
+        message: "WhatsApp nao permitiu adicionar direto; precisa convite.",
+        phone,
+        inviteCode: result.inviteV4Code,
+        inviteExpiresAt: result.inviteV4CodeExp || ""
+      };
+    }
+    if (code === 401 || code === 403) {
+      if (code === 403) {
+        return {
+          status: "needs_invite",
+          message: "O WhatsApp so permite adicionar este participante enviando convite privado.",
+          phone,
+          code: "403"
+        };
+      }
+      return {
+        status: "not_authorized",
+        message: "Sua conta nao esta autorizada a adicionar este participante.",
+        phone,
+        code: String(code)
+      };
+    }
+    if (code === 404) {
+      return {
+        status: "not_found",
+        message: "Participante nao encontrado pelo WhatsApp.",
+        phone,
+        code: "404"
+      };
+    }
+    if (code === 409) {
+      return {
+        status: "already_member",
+        message: "WhatsApp indicou conflito; o numero pode ja estar no grupo.",
+        phone,
+        code: "409"
+      };
+    }
+    if (code === 408 || code === 429) {
+      return {
+        status: "error",
+        message: "WhatsApp bloqueou temporariamente a adicao. Tente novamente mais tarde.",
+        phone,
+        code: String(code)
+      };
+    }
+    if (code === 417) {
+      return {
+        status: "needs_invite",
+        message: "Este participante nao pode ser adicionado diretamente a este grupo/comunidade. Use convite.",
+        phone,
+        code: "417"
+      };
+    }
+    if (code === 419) {
+      return {
+        status: "error",
+        message: "O grupo esta cheio e nao aceita novos participantes.",
+        phone,
+        code: "419"
+      };
+    }
+    if (code === 400) {
+      return {
+        status: "error",
+        message: result?.errorMessage
+          ? `WhatsApp recusou a adicao: ${result.errorMessage}`
+          : "WhatsApp recusou a adicao. Pode ser permissao do grupo, privacidade do contato ou identificador interno incompatível.",
+        phone,
+        code: "400"
+      };
+    }
+    return {
+      status: "error",
+      message: `WhatsApp recusou a adicao${Number.isFinite(code) ? ` (codigo ${code})` : ""}.`,
+      phone,
+      code: Number.isFinite(code) ? String(code) : "unknown_add_result"
+    };
+  }
+
   async function findGroupChatById(groupId) {
     const id = String(groupId || "");
     if (!id) return null;
@@ -545,6 +744,27 @@
 
   async function resolveTarget(rawPhone) {
     try {
+      const target = await lookupPhone(rawPhone);
+      if (!target) return null;
+      const chat = await findOrCreateChat(target.wid);
+      if (!chat) {
+        throw requestError("O WhatsApp confirmou o numero, mas nao abriu o chat interno.", "chat_unavailable");
+      }
+      return {
+        chat,
+        phone: target.phone
+      };
+    } catch (error) {
+      if (isEngineError(error)) {
+        error.fatal = true;
+        error.code = "engine_lookup_failed";
+      }
+      throw error;
+    }
+  }
+
+  async function lookupPhone(rawPhone) {
+    try {
       const digits = String(rawPhone || "").replace(/\D/g, "");
       if (!digits) return null;
 
@@ -554,12 +774,8 @@
       const queryResult = await queryWidExists(requestedWid);
       if (!queryResult?.wid) return null;
 
-      const chat = await findOrCreateChat(queryResult.wid);
-      if (!chat) {
-        throw requestError("O WhatsApp confirmou o numero, mas nao abriu o chat interno.", "chat_unavailable");
-      }
       return {
-        chat,
+        wid: queryResult.wid,
         phone: queryResult.wid.user || digits
       };
     } catch (error) {

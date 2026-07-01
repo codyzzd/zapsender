@@ -7,6 +7,10 @@ import { getCurrentContact, getNextPendingIndex, getNextRunnableIndex, randomDel
 import { loadState, normalizeStoredState, saveState } from "./src/storage.js";
 
 const els = {
+  navCampaignsBtn: document.querySelector("#nav-campaigns-btn"),
+  navGroupsBtn: document.querySelector("#nav-groups-btn"),
+  campaignsView: document.querySelector("#campaigns-view"),
+  groupsView: document.querySelector("#groups-view"),
   newCampaignBtn: document.querySelector("#new-campaign-btn"),
   exportBackupBtn: document.querySelector("#export-backup-btn"),
   importBackupFile: document.querySelector("#import-backup-file"),
@@ -77,7 +81,35 @@ const els = {
   newCampaignName: document.querySelector("#new-campaign-name"),
   copyCampaignOptions: document.querySelector("#copy-campaign-options"),
   sourceCampaignSelect: document.querySelector("#source-campaign-select"),
-  confirmCreateCampaign: document.querySelector("#confirm-create-campaign")
+  confirmCreateCampaign: document.querySelector("#confirm-create-campaign"),
+  groupsCheckWhatsappBtn: document.querySelector("#groups-check-whatsapp-btn"),
+  groupsLoadBtn: document.querySelector("#groups-load-btn"),
+  groupsValidateBtn: document.querySelector("#groups-validate-btn"),
+  groupsTargetSelect: document.querySelector("#groups-target-select"),
+  groupsWhatsappStatus: document.querySelector("#groups-whatsapp-status"),
+  groupsSelectedStatus: document.querySelector("#groups-selected-status"),
+  groupsCsvFile: document.querySelector("#groups-csv-file"),
+  groupsContactsText: document.querySelector("#groups-contacts-text"),
+  groupsErrors: document.querySelector("#groups-errors"),
+  groupsRunLabel: document.querySelector("#groups-run-label"),
+  groupsCountdown: document.querySelector("#groups-countdown"),
+  groupsMinDelay: document.querySelector("#groups-min-delay"),
+  groupsMaxDelay: document.querySelector("#groups-max-delay"),
+  groupsProgress: document.querySelector("#groups-progress"),
+  groupsProgressStatus: document.querySelector("#groups-progress-status"),
+  groupsProgressPercent: document.querySelector("#groups-progress-percent"),
+  groupsProgressCount: document.querySelector("#groups-progress-count"),
+  groupsProgressTrack: document.querySelector("#groups-progress-track"),
+  groupsProgressBar: document.querySelector("#groups-progress-bar"),
+  groupsProgressEstimate: document.querySelector("#groups-progress-estimate"),
+  groupsProgressFinish: document.querySelector("#groups-progress-finish"),
+  groupsStartBtn: document.querySelector("#groups-start-btn"),
+  groupsPauseBtn: document.querySelector("#groups-pause-btn"),
+  groupsResetBtn: document.querySelector("#groups-reset-btn"),
+  groupsExportBtn: document.querySelector("#groups-export-btn"),
+  groupsAlert: document.querySelector("#groups-alert"),
+  groupsSummary: document.querySelector("#groups-summary"),
+  groupsTable: document.querySelector("#groups-table")
 };
 
 let state = null;
@@ -90,6 +122,14 @@ let previewTimer = null;
 let sendSession = null;
 let workerRequestSequence = 0;
 let whatsappGroups = [];
+let activeView = "campaigns";
+let groupContacts = [];
+let groupRunning = false;
+let groupBusy = false;
+let groupCountdownTimer = null;
+let groupCountdownRemaining = 0;
+let groupRunTotal = 0;
+let groupRunCompleted = 0;
 
 const ESTIMATED_SEND_MIN_SECONDS = 8;
 const ESTIMATED_SEND_MAX_SECONDS = 20;
@@ -186,7 +226,16 @@ function render() {
   updateSendProgress();
   updateCurrentPanel();
   updateTable();
+  renderGroupTool();
   updateBusyState();
+}
+
+function setActiveView(view) {
+  activeView = view === "groups" ? "groups" : "campaigns";
+  els.campaignsView.hidden = activeView !== "campaigns";
+  els.groupsView.hidden = activeView !== "groups";
+  els.navCampaignsBtn.classList.toggle("selected", activeView === "campaigns");
+  els.navGroupsBtn.classList.toggle("selected", activeView === "groups");
 }
 
 function renderCampaignList() {
@@ -253,6 +302,18 @@ function updateBusyState() {
   els.downloadGroupCsvBtn.disabled = busy || !els.whatsappGroupSelect.value;
   els.useGroupPreviewBtn.disabled = busy || !els.whatsappGroupSelect.value;
   els.newCampaignBtn.disabled = busy;
+  els.groupsCheckWhatsappBtn.disabled = busy || groupBusy;
+  els.groupsLoadBtn.disabled = busy || groupBusy || groupRunning;
+  els.groupsValidateBtn.disabled = busy || groupBusy || groupRunning || !els.groupsContactsText.value.trim() || !els.groupsTargetSelect.value;
+  els.groupsTargetSelect.disabled = busy || groupBusy || groupRunning || whatsappGroups.length === 0;
+  els.groupsCsvFile.disabled = groupBusy || groupRunning;
+  els.groupsContactsText.disabled = groupBusy || groupRunning;
+  els.groupsMinDelay.disabled = groupBusy || groupRunning;
+  els.groupsMaxDelay.disabled = groupBusy || groupRunning;
+  els.groupsStartBtn.disabled = busy || groupBusy || groupRunning || groupRunnableContacts().length === 0;
+  els.groupsPauseBtn.disabled = !groupRunning;
+  els.groupsResetBtn.disabled = groupBusy || groupRunning || groupContacts.length === 0;
+  els.groupsExportBtn.disabled = groupContacts.length === 0;
 }
 
 function updateStats() {
@@ -669,6 +730,12 @@ function renderWhatsAppGroups(groups = []) {
     option.textContent = `${group.title || "Grupo sem nome"} (${group.participantCount || 0})`;
     return option;
   });
+  const groupToolOptions = groups.map((group) => {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = `${group.title || "Grupo sem nome"} (${group.participantCount || 0})`;
+    return option;
+  });
 
   if (!options.length) {
     const option = document.createElement("option");
@@ -676,12 +743,16 @@ function renderWhatsAppGroups(groups = []) {
     option.textContent = "Nenhum grupo encontrado";
     els.whatsappGroupSelect.replaceChildren(option);
     els.whatsappGroupSelect.disabled = true;
+    const groupToolOption = option.cloneNode(true);
+    els.groupsTargetSelect.replaceChildren(groupToolOption);
   } else {
     els.whatsappGroupSelect.replaceChildren(...options);
     els.whatsappGroupSelect.disabled = false;
+    els.groupsTargetSelect.replaceChildren(...groupToolOptions);
   }
 
   updateGroupImportStatus();
+  updateGroupToolSelectionStatus();
   updateBusyState();
 }
 
@@ -701,8 +772,8 @@ function groupCsvFromPhones(phones) {
   return ["telefone", ...phones].join("\n");
 }
 
-function selectedGroupName() {
-  return whatsappGroups.find((group) => group.id === els.whatsappGroupSelect.value)?.title || "grupo-whatsapp";
+function selectedGroupName(selectElement = els.whatsappGroupSelect) {
+  return whatsappGroups.find((group) => group.id === selectElement.value)?.title || "grupo-whatsapp";
 }
 
 function safeFilename(value) {
@@ -788,6 +859,404 @@ async function exportSelectedGroup({ download = false } = {}) {
     busy = false;
     updateBusyState();
   }
+}
+
+function setGroupsAlert(visible, message = "", type = "success") {
+  els.groupsAlert.hidden = !visible;
+  els.groupsAlert.textContent = message;
+  els.groupsAlert.classList.toggle("ready-alert-error", type === "error");
+}
+
+function updateGroupToolSelectionStatus(message = "") {
+  if (message) {
+    els.groupsSelectedStatus.textContent = message;
+    return;
+  }
+  const selected = whatsappGroups.find((group) => group.id === els.groupsTargetSelect.value);
+  els.groupsSelectedStatus.textContent = selected
+    ? `${selected.participantCount || 0} participantes, ${selected.adminCount || 0} admins`
+    : "Carregue e escolha um grupo.";
+}
+
+function groupStatusClass(status) {
+  if (status === "adicionado") return "badge-enviado";
+  if (status === "valido") return "badge-aberto";
+  if (status === "pendente") return "badge-pendente";
+  if (status === "ja estava no grupo") return "badge-pulado";
+  return "badge-erro";
+}
+
+function groupRunnableContacts() {
+  return groupContacts.filter((contact) => contact.status === "valido" && contact.whatsappValid && !contact.alreadyMember);
+}
+
+function renderGroupTool() {
+  const total = groupContacts.length;
+  const valid = groupContacts.filter((contact) => contact.status === "valido").length;
+  const added = groupContacts.filter((contact) => contact.status === "adicionado").length;
+  const skipped = groupContacts.filter((contact) => ["duplicado", "ja estava no grupo", "numero invalido", "nao encontrado", "precisa convite", "sem permissao"].includes(contact.status)).length;
+  els.groupsSummary.textContent = `${total} contato${total === 1 ? "" : "s"} - ${valid} validos - ${added} adicionados - ${skipped} pulados`;
+  els.groupsRunLabel.textContent = groupRunning
+    ? "Adicao automatica em andamento."
+    : groupRunnableContacts().length
+      ? `${groupRunnableContacts().length} contato${groupRunnableContacts().length === 1 ? "" : "s"} pronto${groupRunnableContacts().length === 1 ? "" : "s"} para adicionar.`
+      : total
+        ? "Nenhum contato validado esta pronto para adicionar."
+        : "Valide a lista antes de iniciar.";
+
+  const rows = groupContacts.map((contact) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(contact.original || "-")}</td>
+      <td>${escapeHtml(contact.display || contact.normalized || "-")}</td>
+      <td><span class="badge ${groupStatusClass(contact.status)}">${escapeHtml(contact.status)}</span></td>
+      <td>${escapeHtml(contact.detail || "-")}</td>
+      <td>${contact.lastActionAt ? new Date(contact.lastActionAt).toLocaleString("pt-BR") : "-"}</td>
+    `;
+    return tr;
+  });
+  els.groupsTable.replaceChildren(...rows);
+  updateGroupProgress();
+}
+
+function updateGroupProgress() {
+  const runnable = groupRunnableContacts().length;
+  const total = groupRunTotal || runnable;
+  const completed = groupRunTotal ? Math.min(groupRunCompleted, groupRunTotal) : 0;
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const complete = groupRunTotal > 0 && runnable === 0 && !groupRunning;
+  const settings = groupDelaySettings();
+  const waits = Math.max(0, runnable - 1);
+  const minSeconds = runnable * 3 + waits * settings.minDelay;
+  const maxSeconds = runnable * 8 + waits * settings.maxDelay;
+
+  els.groupsProgress.classList.toggle("is-running", groupRunning && runnable > 0);
+  els.groupsProgress.classList.toggle("is-complete", complete);
+  els.groupsProgressStatus.textContent = complete
+    ? "Adicao concluida"
+    : groupRunning
+      ? "Adicionando agora"
+      : groupRunTotal && completed > 0
+        ? "Adicao pausada"
+        : "Aguardando validacao";
+  els.groupsProgressPercent.textContent = `${complete ? 100 : percent}%`;
+  els.groupsProgressCount.textContent = groupRunTotal
+    ? `${completed} de ${groupRunTotal} concluidos`
+    : `${runnable} contato${runnable === 1 ? "" : "s"} pronto${runnable === 1 ? "" : "s"}`;
+  els.groupsProgressBar.style.width = `${complete ? 100 : percent}%`;
+  els.groupsProgressTrack.setAttribute("aria-valuenow", String(complete ? 100 : percent));
+  els.groupsProgressEstimate.textContent = runnable
+    ? `Tempo estimado: ${formatDurationRange(minSeconds, maxSeconds)}`
+    : "Nenhum contato validado para adicionar.";
+  els.groupsProgressFinish.textContent = runnable ? `Termino provavel: ${formatFinishRange(minSeconds, maxSeconds)}` : "";
+}
+
+function renderGroupErrors(errors = []) {
+  if (!errors.length) {
+    els.groupsErrors.hidden = true;
+    els.groupsErrors.textContent = "";
+    return;
+  }
+  els.groupsErrors.hidden = false;
+  els.groupsErrors.textContent = errors.join("\n");
+}
+
+function parseGroupContacts() {
+  const text = els.groupsContactsText.value.trim();
+  if (!text) return { contacts: [], errors: ["Cole ou selecione uma lista de telefones."] };
+  const parsed = parseCsv(text);
+  const seen = new Set();
+  const contacts = [];
+  const errors = [...(parsed.errors || [])];
+
+  for (const contact of parsed.contacts || []) {
+    const phoneInfo = normalizePhone(contact.phoneOriginal || contact.phoneNormalized || contact.phoneDisplay);
+    const base = {
+      id: `group-${Date.now()}-${contacts.length}-${phoneInfo.normalized || phoneInfo.original}`,
+      original: phoneInfo.original,
+      normalized: phoneInfo.normalized,
+      display: phoneInfo.display,
+      valid: phoneInfo.valid,
+      whatsappValid: false,
+      alreadyMember: false,
+      status: phoneInfo.valid ? "pendente" : "numero invalido",
+      detail: phoneInfo.valid ? "Aguardando validacao no WhatsApp." : phoneInfo.reason,
+      lastActionAt: null
+    };
+
+    if (!phoneInfo.valid) {
+      contacts.push(base);
+      continue;
+    }
+    if (seen.has(phoneInfo.normalized)) {
+      contacts.push({
+        ...base,
+        status: "duplicado",
+        detail: "Numero repetido na lista."
+      });
+      continue;
+    }
+    seen.add(phoneInfo.normalized);
+    contacts.push(base);
+  }
+
+  return { contacts, errors };
+}
+
+async function validateGroupContacts() {
+  if (groupBusy || groupRunning) return;
+  if (!els.groupsTargetSelect.value) {
+    setGroupsAlert(true, "Carregue e escolha um grupo primeiro.", "error");
+    return;
+  }
+
+  groupBusy = true;
+  setGroupsAlert(false);
+  renderGroupErrors([]);
+  updateBusyState();
+
+  try {
+    const parsed = parseGroupContacts();
+    groupContacts = parsed.contacts;
+    renderGroupErrors(parsed.errors || []);
+    renderGroupTool();
+
+    if (!groupContacts.length) {
+      setGroupsAlert(true, "Nenhum contato encontrado para validar.", "error");
+      return;
+    }
+
+    updateGroupToolSelectionStatus("Lendo participantes atuais...");
+    const participantsResult = await exportGroupParticipants(els.groupsTargetSelect.value, true);
+    if (participantsResult.status !== "ok") {
+      setGroupsAlert(true, participantsResult.message || "Nao foi possivel ler os participantes do grupo.", "error");
+      return;
+    }
+
+    const memberPhones = new Set(phonesFromGroupExport(participantsResult));
+    const toValidate = groupContacts.filter((contact) => contact.valid && contact.status === "pendente");
+    for (let index = 0; index < toValidate.length; index += 1) {
+      const contact = toValidate[index];
+      updateGroupToolSelectionStatus(`Validando ${index + 1} de ${toValidate.length}...`);
+
+      if (memberPhones.has(contact.normalized)) {
+        updateGroupContact(contact.id, {
+          alreadyMember: true,
+          status: "ja estava no grupo",
+          detail: "Numero ja aparece entre os participantes.",
+          lastActionAt: new Date().toISOString()
+        });
+        continue;
+      }
+
+      const result = await validateWhatsAppPhone(contact.normalized);
+      if (result.fatal || (result.status === "error" && result.code !== "invalid_number")) {
+        throw new Error(result.message || "Falha ao validar numero no WhatsApp.");
+      }
+      if (result.status === "ok" && result.exists) {
+        updateGroupContact(contact.id, {
+          whatsappValid: true,
+          status: "valido",
+          detail: "Numero existe no WhatsApp e nao esta no grupo.",
+          lastActionAt: new Date().toISOString()
+        });
+      } else {
+        updateGroupContact(contact.id, {
+          status: "nao encontrado",
+          detail: result.message || "Numero nao encontrado no WhatsApp.",
+          lastActionAt: new Date().toISOString()
+        });
+      }
+    }
+
+    groupRunTotal = 0;
+    groupRunCompleted = 0;
+    updateGroupToolSelectionStatus();
+    renderGroupTool();
+    const runnable = groupRunnableContacts().length;
+    setGroupsAlert(true, `${runnable} contato${runnable === 1 ? "" : "s"} validado${runnable === 1 ? "" : "s"} para adicionar.`);
+  } catch (error) {
+    setGroupsAlert(true, error.message, "error");
+  } finally {
+    groupBusy = false;
+    updateGroupToolSelectionStatus();
+    renderGroupTool();
+    updateBusyState();
+  }
+}
+
+function updateGroupContact(contactId, patch) {
+  groupContacts = groupContacts.map((contact) => contact.id === contactId ? { ...contact, ...patch } : contact);
+  renderGroupTool();
+}
+
+function groupDelaySettings() {
+  const min = Math.max(3, Number(els.groupsMinDelay.value) || 10);
+  const max = Math.max(3, Number(els.groupsMaxDelay.value) || min);
+  return {
+    minDelay: Math.min(min, max),
+    maxDelay: Math.max(min, max)
+  };
+}
+
+function clearGroupCountdown() {
+  if (groupCountdownTimer) clearInterval(groupCountdownTimer);
+  groupCountdownTimer = null;
+  groupCountdownRemaining = 0;
+  els.groupsCountdown.hidden = true;
+  els.groupsCountdown.textContent = "";
+  updateGroupProgress();
+}
+
+async function startGroupCountdownThenAdd() {
+  clearGroupCountdown();
+  const settings = groupDelaySettings();
+  groupCountdownRemaining = randomDelaySeconds(settings.minDelay, settings.maxDelay);
+  els.groupsCountdown.hidden = false;
+  els.groupsCountdown.textContent = `Proxima adicao em ${groupCountdownRemaining}s`;
+
+  groupCountdownTimer = setInterval(async () => {
+    groupCountdownRemaining -= 1;
+    els.groupsCountdown.textContent = `Proxima adicao em ${groupCountdownRemaining}s`;
+    updateGroupProgress();
+    if (groupCountdownRemaining <= 0) {
+      clearGroupCountdown();
+      if (groupRunning) await addNextGroupMember();
+    }
+  }, 1000);
+}
+
+async function startGroupAddition() {
+  if (groupBusy || groupRunning) return;
+  const runnable = groupRunnableContacts();
+  if (!runnable.length) {
+    setGroupsAlert(true, "Valide a lista antes de iniciar.", "error");
+    return;
+  }
+
+  const tabStatus = await checkWhatsAppTab();
+  if (!tabStatus.ready) {
+    els.groupsWhatsappStatus.textContent = "Motor indisponivel";
+    setGroupsAlert(true, tabStatus.message || tabStatus.error || "Abra e conecte o WhatsApp Web antes de iniciar.", "error");
+    return;
+  }
+
+  els.groupsWhatsappStatus.textContent = "Motor pronto";
+  groupRunning = true;
+  groupRunTotal = runnable.length;
+  groupRunCompleted = 0;
+  updateBusyState();
+  updateGroupProgress();
+  await addNextGroupMember();
+}
+
+async function addNextGroupMember() {
+  if (groupBusy || !groupRunning) return;
+  const contact = groupRunnableContacts()[0];
+  if (!contact) {
+    groupRunning = false;
+    clearGroupCountdown();
+    setGroupsAlert(true, "Adicao em grupo concluida.");
+    renderGroupTool();
+    updateBusyState();
+    return;
+  }
+
+  groupBusy = true;
+  updateBusyState();
+  setGroupsAlert(false);
+
+  try {
+    const result = await addGroupParticipant(els.groupsTargetSelect.value, contact.normalized);
+    const mapped = mapGroupAddResult(result);
+    updateGroupContact(contact.id, {
+      status: mapped.status,
+      detail: mapped.detail,
+      lastActionAt: new Date().toISOString()
+    });
+    groupRunCompleted += 1;
+  } catch (error) {
+    updateGroupContact(contact.id, {
+      status: "erro",
+      detail: error.message,
+      lastActionAt: new Date().toISOString()
+    });
+    groupRunCompleted += 1;
+  } finally {
+    groupBusy = false;
+    renderGroupTool();
+    updateBusyState();
+  }
+
+  if (!groupRunning) return;
+  if (groupRunnableContacts().length) {
+    await startGroupCountdownThenAdd();
+  } else {
+    groupRunning = false;
+    clearGroupCountdown();
+    setGroupsAlert(true, "Adicao em grupo concluida.");
+    updateBusyState();
+    renderGroupTool();
+  }
+}
+
+function mapGroupAddResult(result) {
+  if (result.status === "added") {
+    return { status: "adicionado", detail: result.message || "Participante adicionado ao grupo." };
+  }
+  if (result.status === "already_member") {
+    return { status: "ja estava no grupo", detail: result.message || "Numero ja estava no grupo." };
+  }
+  if (result.status === "needs_invite") {
+    return { status: "precisa convite", detail: result.message || "WhatsApp nao permitiu adicionar direto." };
+  }
+  if (result.status === "not_authorized") {
+    return { status: "sem permissao", detail: result.message || "Sua conta nao tem permissao para adicionar." };
+  }
+  if (result.status === "not_found") {
+    return { status: "nao encontrado", detail: result.message || "Numero nao encontrado no WhatsApp." };
+  }
+  return { status: "erro", detail: result.message || result.detail || "Falha ao adicionar participante." };
+}
+
+function pauseGroupAddition() {
+  groupRunning = false;
+  clearGroupCountdown();
+  renderGroupTool();
+  updateBusyState();
+}
+
+function resetGroupTool() {
+  groupRunning = false;
+  groupBusy = false;
+  clearGroupCountdown();
+  groupContacts = [];
+  groupRunTotal = 0;
+  groupRunCompleted = 0;
+  renderGroupErrors([]);
+  setGroupsAlert(false);
+  renderGroupTool();
+  updateBusyState();
+}
+
+function groupReportCsv() {
+  const rows = [
+    ["telefone_original", "telefone_normalizado", "status", "detalhe", "ultima_acao"],
+    ...groupContacts.map((contact) => [
+      contact.original,
+      contact.normalized,
+      contact.status,
+      contact.detail,
+      contact.lastActionAt || ""
+    ])
+  ];
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
+function escapeCsvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
 function schedulePreviewCsv() {
@@ -961,6 +1430,14 @@ function listWhatsAppGroups() {
 
 function exportGroupParticipants(groupId, includeAdmins) {
   return sendWorkerRequest({ type: "EXPORT_GROUP_PARTICIPANTS", groupId, includeAdmins }, 120000);
+}
+
+function validateWhatsAppPhone(phone) {
+  return sendWorkerRequest({ type: "VALIDATE_WHATSAPP_PHONE", phone }, 90000);
+}
+
+function addGroupParticipant(groupId, phone) {
+  return sendWorkerRequest({ type: "ADD_GROUP_PARTICIPANT", groupId, phone }, 120000);
 }
 
 function sendWorkerRequest(payload, timeoutMs) {
@@ -1140,6 +1617,9 @@ function formatDate(value) {
   return new Date(value).toLocaleString("pt-BR");
 }
 
+els.navCampaignsBtn.addEventListener("click", () => setActiveView("campaigns"));
+els.navGroupsBtn.addEventListener("click", () => setActiveView("groups"));
+
 els.newCampaignBtn.addEventListener("click", () => {
   openCampaignModal();
 });
@@ -1195,6 +1675,50 @@ els.useGroupPreviewBtn.addEventListener("click", () => exportSelectedGroup({ dow
 els.previewImportBtn.addEventListener("click", previewCsv);
 els.manualContactForm.addEventListener("submit", addManualContact);
 els.manualContactPhone.addEventListener("input", () => setManualContactError(""));
+
+els.groupsCheckWhatsappBtn.addEventListener("click", async () => {
+  const result = await checkWhatsAppTab();
+  if (result.ready) {
+    els.groupsWhatsappStatus.textContent = "Motor pronto";
+    setGroupsAlert(true, "WhatsApp Web encontrado e motor pronto.");
+  } else {
+    els.groupsWhatsappStatus.textContent = "Motor indisponivel";
+    setGroupsAlert(true, result.message || result.error || "Abra e conecte o WhatsApp Web antes de iniciar.", "error");
+  }
+});
+els.groupsLoadBtn.addEventListener("click", loadWhatsAppGroups);
+els.groupsTargetSelect.addEventListener("change", () => {
+  updateGroupToolSelectionStatus();
+  updateBusyState();
+});
+els.groupsCsvFile.addEventListener("change", async () => {
+  const file = els.groupsCsvFile.files?.[0];
+  if (!file) return;
+  els.groupsContactsText.value = await file.text();
+  groupContacts = [];
+  groupRunTotal = 0;
+  groupRunCompleted = 0;
+  renderGroupTool();
+  updateBusyState();
+});
+els.groupsContactsText.addEventListener("input", () => {
+  groupContacts = [];
+  groupRunTotal = 0;
+  groupRunCompleted = 0;
+  renderGroupErrors([]);
+  setGroupsAlert(false);
+  renderGroupTool();
+  updateBusyState();
+});
+els.groupsValidateBtn.addEventListener("click", validateGroupContacts);
+els.groupsStartBtn.addEventListener("click", startGroupAddition);
+els.groupsPauseBtn.addEventListener("click", pauseGroupAddition);
+els.groupsResetBtn.addEventListener("click", resetGroupTool);
+els.groupsMinDelay.addEventListener("input", updateGroupProgress);
+els.groupsMaxDelay.addEventListener("input", updateGroupProgress);
+els.groupsExportBtn.addEventListener("click", () => {
+  downloadText(`${safeFilename(selectedGroupName(els.groupsTargetSelect))}-adicoes.csv`, groupReportCsv(), "text/csv;charset=utf-8");
+});
 
 els.importBtn.addEventListener("click", async () => {
   sendSession = null;
@@ -1361,6 +1885,7 @@ loadState()
   .then(refreshAttachmentAvailability)
   .then((nextState) => {
     state = nextState;
+    setActiveView("campaigns");
     render();
   })
   .catch((error) => {

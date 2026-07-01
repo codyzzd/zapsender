@@ -135,7 +135,7 @@ code {
   height: 100vh;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 14px;
   padding: 18px;
   background: var(--sidebar);
@@ -175,6 +175,32 @@ code {
 
 .sidebar-primary {
   width: 100%;
+}
+
+.sidebar-nav {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  border-radius: 10px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.sidebar-nav button {
+  min-height: 36px;
+  border-color: transparent;
+  background: transparent;
+  color: #c7d8cf;
+  font-size: 12px;
+}
+
+.sidebar-nav button:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.sidebar-nav button.selected {
+  background: #ffffff;
+  color: #10231b;
 }
 
 .sidebar-section-heading {
@@ -490,6 +516,35 @@ dialog label,
 .group-import-controls .checkbox-row input {
   width: 16px;
   height: 16px;
+}
+
+.group-tool-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.75fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.group-tool-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.group-tool-status {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8faf8;
+}
+
+.group-tool-status span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .inline-status {
@@ -1101,7 +1156,7 @@ dialog select {
   .campaign-sidebar {
     position: static;
     height: auto;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto;
   }
 
   .campaign-list {
@@ -1131,6 +1186,10 @@ dialog select {
 
   .stats-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .group-tool-grid {
+    grid-template-columns: 1fr;
   }
 }
 
